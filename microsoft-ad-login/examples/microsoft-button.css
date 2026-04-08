@@ -1,0 +1,127 @@
+/**
+ * Microsoft 登入按鈕樣式
+ * 
+ * 將此樣式加入專案的 CSS 檔案中，
+ * 或直接在 HTML 中使用 <style> 標籤引入。
+ */
+
+/* Microsoft 登入按鈕 */
+.microsoft-login-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 20px;
+  background-color: #2F2F2F;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.microsoft-login-btn:hover {
+  background-color: #0078D4;
+}
+
+.microsoft-login-btn:active {
+  background-color: #006CBE;
+}
+
+.microsoft-login-btn:focus {
+  outline: 2px solid #0078D4;
+  outline-offset: 2px;
+}
+
+/* Microsoft Logo SVG */
+.microsoft-login-btn svg {
+  flex-shrink: 0;
+}
+
+/* 分隔線 */
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 20px 0;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid #ddd;
+}
+
+.divider span {
+  padding: 0 10px;
+  color: #888;
+  font-size: 14px;
+}
+
+/* ============================================
+   可選：深色主題樣式
+   ============================================ */
+
+/* 
+.dark-theme .microsoft-login-btn {
+  background-color: #ffffff;
+  color: #2F2F2F;
+}
+
+.dark-theme .microsoft-login-btn:hover {
+  background-color: #f0f0f0;
+}
+
+.dark-theme .divider::before,
+.dark-theme .divider::after {
+  border-bottom-color: #444;
+}
+
+.dark-theme .divider span {
+  color: #aaa;
+}
+*/
+
+/* ============================================
+   可選：載入中狀態
+   ============================================ */
+
+.microsoft-login-btn.loading {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.microsoft-login-btn.loading::after {
+  content: '';
+  width: 16px;
+  height: 16px;
+  margin-left: 8px;
+  border: 2px solid #ffffff;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ============================================
+   可選：錯誤提示
+   ============================================ */
+
+.login-error {
+  color: #d32f2f;
+  font-size: 14px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background-color: #ffebee;
+  border-radius: 4px;
+  text-align: center;
+}
