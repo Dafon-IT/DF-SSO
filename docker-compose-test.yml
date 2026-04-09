@@ -75,10 +75,8 @@ services:
       ERP_API_PASSWORD: ${ERP_API_PASSWORD}
       SERVICE_URL_BACKEND_35890:
     depends_on:
-      postgres:
-        # condition: service_healthy
-      redis:
-        condition: service_healthy
+      - postgres
+      - redis
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:35890/api/health"]
       interval: 30s
@@ -125,8 +123,7 @@ services:
       ADMINER_DESIGN: dracula
       SERVICE_URL_ADMINER_8080: 
     depends_on:
-      postgres:
-        # condition: service_healthy
+      - postgres
 
 volumes:
   sso-postgres-data:
