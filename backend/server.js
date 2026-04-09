@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
-const { RedisStore } = require('connect-redis');
+const RedisStore = require('connect-redis').default;
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
