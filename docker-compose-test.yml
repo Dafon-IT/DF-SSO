@@ -73,7 +73,7 @@ services:
       ERP_API_SEARCH_URL: ${ERP_API_SEARCH_URL}
       ERP_API_ACCOUNT: ${ERP_API_ACCOUNT}
       ERP_API_PASSWORD: ${ERP_API_PASSWORD}
-      SERVICE_URL_BACKEND_35890: ${SERVICE_URL_BACKEND_35890}
+      SERVICE_URL_BACKEND_35890:
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,7 +101,7 @@ services:
       - "3000"
     environment:
       NODE_ENV: production
-      SERVICE_URL_FRONTEND_3000: ${SERVICE_URL_FRONTEND_3000}
+      SERVICE_URL_FRONTEND_3000:
     depends_on:
       backend:
         condition: service_healthy
@@ -123,7 +123,7 @@ services:
     environment:
       ADMINER_DEFAULT_SERVER: postgres
       ADMINER_DESIGN: dracula
-      SERVICE_URL_ADMINER_8080: ${SERVICE_URL_ADMINER_8080}
+      SERVICE_URL_ADMINER_8080: 
     depends_on:
       postgres:
         condition: service_healthy
