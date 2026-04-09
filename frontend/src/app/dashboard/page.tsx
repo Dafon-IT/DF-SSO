@@ -26,6 +26,7 @@ interface AllowedItem {
   uid: string;
   domain: string;
   name: string;
+  env: "production" | "test" | "local";
   description: string;
   is_active: boolean;
   is_deleted: boolean;
@@ -146,7 +147,8 @@ function AllowedListPanel() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState<AllowedItem | null>(null);
-  const [form, setForm] = useState({ domain: "", name: "", description: "" });
+  const [form, setForm] = useState({ domain: "", name: "", env: "local", description: "" });
+  const [envFilter, setEnvFilter] = useState<string>("");
 
   const fetchList = useCallback(async () => {
     setLoading(true);
@@ -184,7 +186,7 @@ function AllowedListPanel() {
     if (data.success) {
       setShowForm(false);
       setEditItem(null);
-      setForm({ domain: "", name: "", description: "" });
+      setForm({ domain: "", name: "", env: "local", description: "" });
       fetchList();
     } else {
       alert(data.error || "操作失敗");
@@ -196,6 +198,7 @@ function AllowedListPanel() {
     setForm({
       domain: item.domain,
       name: item.name || "",
+      env: item.env || "local",
       description: item.description || "",
     });
     setShowForm(true);
@@ -274,6 +277,20 @@ function AllowedListPanel() {
             </div>
             <div>
               <label className="block text-base font-medium text-gray-700 mb-1">
+                環境
+              </label>
+              <select
+                value={form.env}
+                onChange={(e) => setForm({ ...form, env: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="local">Local（本機開發）</option>
+                <option value="test">Test（測試環境）</option>
+                <option value="production">Production（正式環境）</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-base font-medium text-gray-700 mb-1">
                 說明
               </label>
               <input
@@ -308,11 +325,28 @@ function AllowedListPanel() {
         </div>
       )}
 
+      {/* Filter */}
+      <div className="flex gap-2">
+        {["", "production", "test", "local"].map((v) => (
+          <button
+            key={v}
+            onClick={() => setEnvFilter(v)}
+            className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+              envFilter === v
+                ? "bg-blue-600 text-white"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            {v === "" ? "全部" : v === "production" ? "Production" : v === "test" ? "Test" : "Local"}
+          </button>
+        ))}
+      </div>
+
       {/* Table */}
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
         {loading ? (
           <p className="p-6 text-base text-gray-500">載入中...</p>
-        ) : items.length === 0 ? (
+        ) : items.filter((i) => !envFilter || i.env === envFilter).length === 0 ? (
           <p className="p-6 text-base text-gray-500">尚無資料</p>
         ) : (
           <table className="w-full text-base">
@@ -320,19 +354,31 @@ function AllowedListPanel() {
               <tr>
                 <th className="px-4 py-3 font-medium">網域</th>
                 <th className="px-4 py-3 font-medium">名稱</th>
+                <th className="px-4 py-3 font-medium">環境</th>
                 <th className="px-4 py-3 font-medium">說明</th>
                 <th className="px-4 py-3 font-medium">狀態</th>
                 <th className="px-4 py-3 font-medium">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {items.map((item) => (
+              {items.filter((i) => !envFilter || i.env === envFilter).map((item) => (
                 <tr key={item.uid}>
                   <td className="px-4 py-3 font-mono text-sm text-gray-900">
                     {item.domain}
                   </td>
                   <td className="px-4 py-3 text-gray-900">
                     {item.name || "-"}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-medium ${
+                      item.env === "production"
+                        ? "bg-red-100 text-red-700"
+                        : item.env === "test"
+                        ? "bg-yellow-100 text-yellow-700"
+                        : "bg-blue-100 text-blue-700"
+                    }`}>
+                      {item.env === "production" ? "Production" : item.env === "test" ? "Test" : "Local"}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-gray-500">
                     {item.description || "-"}

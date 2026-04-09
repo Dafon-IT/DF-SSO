@@ -2,11 +2,11 @@ exports.shorthands = undefined;
 
 exports.up = (pgm) => {
   pgm.sql(`
-    INSERT INTO sso_allowed_list (domain, name, description)
+    INSERT INTO sso_allowed_list (domain, name, env, description)
     VALUES
-      ('http://localhost:3000', 'SSO Frontend', 'DF-SSO 管理後台（本機開發）'),
-      ('http://localhost:3100', 'App A', '資產管理系統（本機開發）'),
-      ('http://localhost:3200', 'App B', '報修系統（本機開發）')
+      ('http://localhost:3000', 'SSO Frontend', 'local', 'DF-SSO 管理後台（本機開發）'),
+      ('http://localhost:3100', 'App A', 'local', '資產管理系統（本機開發）'),
+      ('http://localhost:3200', 'App B', 'local', '報修系統（本機開發）')
     ON CONFLICT DO NOTHING
   `);
 };

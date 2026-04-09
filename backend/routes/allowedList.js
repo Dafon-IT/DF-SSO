@@ -40,11 +40,14 @@ router.get('/:uid', async (req, res) => {
  */
 router.post('/', async (req, res) => {
   try {
-    const { domain, name, description } = req.body;
+    const { domain, name, env, description } = req.body;
     if (!domain) {
       return res.status(400).json({ success: false, error: 'domain is required' });
     }
-    const item = await allowedListService.create({ domain, name, description });
+    if (env && !['production', 'test', 'local'].includes(env)) {
+      return res.status(400).json({ success: false, error: 'env must be production, test, or local' });
+    }
+    const item = await allowedListService.create({ domain, name, env, description });
     res.status(201).json({ success: true, data: item });
   } catch (error) {
     console.error('AllowedList create error:', error.message);
@@ -61,10 +64,14 @@ router.post('/', async (req, res) => {
  */
 router.put('/:uid', async (req, res) => {
   try {
-    const { domain, name, description, is_active } = req.body;
+    const { domain, name, env, description, is_active } = req.body;
+    if (env && !['production', 'test', 'local'].includes(env)) {
+      return res.status(400).json({ success: false, error: 'env must be production, test, or local' });
+    }
     const item = await allowedListService.update(req.params.uid, {
       domain,
       name,
+      env,
       description,
       isActive: is_active,
     });

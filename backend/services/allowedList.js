@@ -39,7 +39,7 @@ async function findByName(name) {
  * 新增白名單
  * 若 domain 已存在且 is_deleted = TRUE，則恢復該筆資��
  */
-async function create({ domain, name, description }) {
+async function create({ domain, name, env, description }) {
   // 檢查是否已存在但被軟刪除的資料
   const { rows: deleted } = await db.query(
     'SELECT * FROM sso_allowed_list WHERE domain = $1 AND is_deleted = TRUE',
@@ -49,19 +49,19 @@ async function create({ domain, name, description }) {
   if (deleted.length > 0) {
     const { rows } = await db.query(
       `UPDATE sso_allowed_list
-       SET is_deleted = FALSE, is_active = TRUE, name = $2, description = $3
+       SET is_deleted = FALSE, is_active = TRUE, name = $2, env = $3, description = $4
        WHERE ppid = $1
        RETURNING *`,
-      [deleted[0].ppid, name, description]
+      [deleted[0].ppid, name, env || 'local', description]
     );
     return rows[0];
   }
 
   const { rows } = await db.query(
-    `INSERT INTO sso_allowed_list (domain, name, description)
-     VALUES ($1, $2, $3)
+    `INSERT INTO sso_allowed_list (domain, name, env, description)
+     VALUES ($1, $2, $3, $4)
      RETURNING *`,
-    [domain, name, description]
+    [domain, name, env || 'local', description]
   );
   return rows[0];
 }
@@ -69,7 +69,7 @@ async function create({ domain, name, description }) {
 /**
  * 更新白名單
  */
-async function update(uid, { domain, name, description, isActive }) {
+async function update(uid, { domain, name, env, description, isActive }) {
   const fields = [];
   const params = [];
   let paramIndex = 1;
@@ -81,6 +81,10 @@ async function update(uid, { domain, name, description, isActive }) {
   if (name !== undefined) {
     fields.push(`name = $${paramIndex++}`);
     params.push(name);
+  }
+  if (env !== undefined) {
+    fields.push(`env = $${paramIndex++}`);
+    params.push(env);
   }
   if (description !== undefined) {
     fields.push(`description = $${paramIndex++}`);
