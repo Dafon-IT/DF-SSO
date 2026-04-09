@@ -1,0 +1,24 @@
+services:
+  app-a:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SSO_URL: ${NEXT_PUBLIC_SSO_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME}
+    restart: unless-stopped
+    expose:
+      - "3100"
+    environment:
+      NODE_ENV: production
+      SSO_URL: ${SSO_URL}
+      APP_URL: ${APP_URL}
+      SESSION_SECRET: ${SESSION_SECRET}
+      SERVICE_URL_APP_A_3100: ${SERVICE_URL_APP_A_3100}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
