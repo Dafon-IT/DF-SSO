@@ -1,12 +1,14 @@
 {
   "name": "df-sso-backend",
   "version": "1.0.0",
-  "description": "DF-SSO Backend - Microsoft AD Login with Express + PostgreSQL",
-  "main": "src/index.js",
+  "description": "DF SSO Backend - Microsoft Azure AD Login",
+  "main": "server.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
-    "migrate": "node src/db/migrate.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "migrate:up": "node-pg-migrate up",
+    "migrate:down": "node-pg-migrate down",
+    "migrate:create": "node-pg-migrate create"
   },
   "dependencies": {
     "@azure/msal-node": "^2.16.2",
@@ -15,10 +17,10 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
-    "connect-redis": "^8.0.1",
-    "ioredis": "^5.4.2",
+    "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.2",
-    "pg": "^8.13.1"
+    "node-pg-migrate": "^8.0.4",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"

@@ -1,10 +1,11 @@
 const msal = require('@azure/msal-node');
+const config = require('./index');
 
 const msalConfig = {
   auth: {
-    clientId: process.env.AZURE_CLIENT_ID,
-    authority: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}`,
-    clientSecret: process.env.AZURE_CLIENT_SECRET,
+    clientId: config.azure.clientId,
+    authority: `https://login.microsoftonline.com/${config.azure.tenantId}`,
+    clientSecret: config.azure.clientSecret,
   },
   system: {
     loggerOptions: {
@@ -21,6 +22,4 @@ const msalConfig = {
 
 const cca = new msal.ConfidentialClientApplication(msalConfig);
 
-const SCOPES = ['openid', 'profile', 'email', 'User.Read'];
-
-module.exports = { cca, SCOPES };
+module.exports = { cca };

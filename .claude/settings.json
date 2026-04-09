@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-turbopack --use-npm)",
+      "Bash(timeout 8 node server.js)",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(16\\).toString\\('hex'\\)\\)\")",
+      "Bash(node -e \"const c=require\\('crypto'\\); console.log\\(c.randomBytes\\(32\\).toString\\('hex'\\)\\); console.log\\(c.randomBytes\\(32\\).toString\\('hex'\\)\\)\")",
+      "Bash(echo \"---EXIT:$?\")",
+      "Bash(psql -h localhost -p 5432 -U postgres -d SSO-v1 -f sql/init.sql)"
+    ]
+  }
+}
