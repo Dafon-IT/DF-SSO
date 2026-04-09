@@ -40,13 +40,13 @@ function LoginContent() {
         <div className="rounded-xl bg-white p-8 shadow-lg">
           {/* Header */}
           <div className="mb-8 text-center">
-            <h1 className="text-2xl font-bold text-gray-900">DF-SSO</h1>
-            <p className="mt-2 text-sm text-gray-500">大豐 SSO 單一登入系統</p>
+            <h1 className="text-3xl font-bold text-gray-900">DF-SSO</h1>
+            <p className="mt-2 text-base text-gray-500">大豐 SSO 單一登入系統</p>
           </div>
 
           {/* Error Message */}
           {error && (
-            <div className="mb-6 rounded-lg bg-red-50 p-3 text-center text-sm text-red-600">
+            <div className="mb-6 rounded-lg bg-red-50 p-3 text-center text-base text-red-600">
               {ERROR_MESSAGES[error] || `登入錯誤: ${error}`}
             </div>
           )}
@@ -54,7 +54,7 @@ function LoginContent() {
           {/* Microsoft Login Button */}
           <a
             href={`${API_BASE_URL}/api/auth/${AUTH_PATH}/login`}
-            className="flex w-full items-center justify-center gap-3 rounded-lg bg-[#2F2F2F] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#0078D4]"
+            className="flex w-full items-center justify-center gap-3 rounded-lg bg-[#2F2F2F] px-4 py-3 text-base font-medium text-white transition-colors hover:bg-[#0078D4]"
           >
             <MicrosoftIcon />
             使用 Microsoft 帳號登入

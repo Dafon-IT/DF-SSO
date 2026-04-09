@@ -7,7 +7,12 @@
       "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(16\\).toString\\('hex'\\)\\)\")",
       "Bash(node -e \"const c=require\\('crypto'\\); console.log\\(c.randomBytes\\(32\\).toString\\('hex'\\)\\); console.log\\(c.randomBytes\\(32\\).toString\\('hex'\\)\\)\")",
       "Bash(echo \"---EXIT:$?\")",
-      "Bash(psql -h localhost -p 5432 -U postgres -d SSO-v1 -f sql/init.sql)"
+      "Bash(psql -h localhost -p 5432 -U postgres -d SSO-v1 -f sql/init.sql)",
+      "Bash(curl -s \"https://api.github.com/repos/Sapphire0912/SSO-Demo\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/Sapphire0912/SSO-Demo/main/README.md\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/Sapphire0912/SSO-Demo/main/auth_server/main.py\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/Sapphire0912/SSO-Demo/main/auth_server/config.py\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/Sapphire0912/SSO-Demo/main/auth_server/session.py\")"
     ]
   }
 }

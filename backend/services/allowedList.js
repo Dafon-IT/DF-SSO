@@ -1,7 +1,7 @@
 const db = require('../config/database');
 
 /**
- * 取得所有未刪除的白名單
+ * 取得所有未刪除的���名單
  */
 async function findAll({ includeInactive = false } = {}) {
   const condition = includeInactive
@@ -25,8 +25,19 @@ async function findByUid(uid) {
 }
 
 /**
+ * 依 name 取得單筆（啟用中）
+ */
+async function findByName(name) {
+  const { rows } = await db.query(
+    'SELECT * FROM sso_allowed_list WHERE name = $1 AND is_active = TRUE AND is_deleted = FALSE LIMIT 1',
+    [name]
+  );
+  return rows[0] || null;
+}
+
+/**
  * 新增白名單
- * 若 domain 已存在且 is_deleted = TRUE，則恢復該筆資料
+ * 若 domain 已存在且 is_deleted = TRUE，則恢復該筆資��
  */
 async function create({ domain, name, description }) {
   // 檢查是否已存在但被軟刪除的資料
@@ -112,4 +123,4 @@ async function isDomainAllowed(domain) {
   return rows.length > 0;
 }
 
-module.exports = { findAll, findByUid, create, update, remove, isDomainAllowed };
+module.exports = { findAll, findByUid, findByName, create, update, remove, isDomainAllowed };

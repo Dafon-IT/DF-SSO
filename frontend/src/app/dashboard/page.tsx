@@ -87,16 +87,16 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <h1 className="text-xl font-bold text-gray-900">DF-SSO Dashboard</h1>
+        <div className="mx-auto flex items-center justify-between px-6 py-4">
+          <h1 className="text-2xl font-bold text-gray-900">DF-SSO Dashboard</h1>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-gray-900">{user.name}</p>
-              <p className="text-xs text-gray-500">{user.email}</p>
+              <p className="text-base font-medium text-gray-900">{user.name}</p>
+              <p className="text-sm text-gray-500">{user.email}</p>
             </div>
             <button
               onClick={handleLogout}
-              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              className="rounded-lg border border-gray-300 px-4 py-2 text-base font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               登出
             </button>
@@ -105,11 +105,11 @@ export default function DashboardPage() {
       </header>
 
       {/* Tabs */}
-      <div className="mx-auto max-w-7xl px-6 pt-6">
+      <div className="mx-6 pt-6">
         <div className="flex gap-1 border-b border-gray-200">
           <button
             onClick={() => setActiveTab("allowed")}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors ${
               activeTab === "allowed"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
@@ -119,7 +119,7 @@ export default function DashboardPage() {
           </button>
           <button
             onClick={() => setActiveTab("logs")}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors ${
               activeTab === "logs"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
@@ -131,7 +131,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Content */}
-      <main className="mx-auto max-w-7xl px-6 py-6">
+      <main className="m-6">
         {activeTab === "allowed" ? <AllowedListPanel /> : <LoginLogPanel />}
       </main>
     </div>
@@ -229,12 +229,12 @@ function AllowedListPanel() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">
+        <h2 className="text-xl font-semibold text-gray-900">
           白名單網域管理
         </h2>
         <button
           onClick={handleAdd}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+          className="rounded-lg bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700 transition-colors"
         >
           新增網域
         </button>
@@ -243,12 +243,12 @@ function AllowedListPanel() {
       {/* Form */}
       {showForm && (
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">
+          <h3 className="text-base font-semibold text-gray-900 mb-4">
             {editItem ? "編輯網域" : "新增網域"}
           </h3>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-base font-medium text-gray-700 mb-1">
                 網域 *
               </label>
               <input
@@ -257,11 +257,11 @@ function AllowedListPanel() {
                 value={form.domain}
                 onChange={(e) => setForm({ ...form, domain: e.target.value })}
                 placeholder="https://crm.df-recycle.com.tw"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-base font-medium text-gray-700 mb-1">
                 系統名稱
               </label>
               <input
@@ -269,11 +269,11 @@ function AllowedListPanel() {
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="CRM 系統"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-base font-medium text-gray-700 mb-1">
                 說明
               </label>
               <input
@@ -283,13 +283,13 @@ function AllowedListPanel() {
                   setForm({ ...form, description: e.target.value })
                 }
                 placeholder="系統說明"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <div className="flex gap-2 pt-2">
               <button
                 type="submit"
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700"
               >
                 {editItem ? "儲存" : "新增"}
               </button>
@@ -299,7 +299,7 @@ function AllowedListPanel() {
                   setShowForm(false);
                   setEditItem(null);
                 }}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-base font-medium text-gray-700 hover:bg-gray-50"
               >
                 取消
               </button>
@@ -311,11 +311,11 @@ function AllowedListPanel() {
       {/* Table */}
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
         {loading ? (
-          <p className="p-6 text-sm text-gray-500">載入中...</p>
+          <p className="p-6 text-base text-gray-500">載入中...</p>
         ) : items.length === 0 ? (
-          <p className="p-6 text-sm text-gray-500">尚無資料</p>
+          <p className="p-6 text-base text-gray-500">尚無資料</p>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-base">
             <thead className="bg-gray-50 text-left text-gray-500">
               <tr>
                 <th className="px-4 py-3 font-medium">網域</th>
@@ -328,7 +328,7 @@ function AllowedListPanel() {
             <tbody className="divide-y divide-gray-100">
               {items.map((item) => (
                 <tr key={item.uid}>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-900">
+                  <td className="px-4 py-3 font-mono text-sm text-gray-900">
                     {item.domain}
                   </td>
                   <td className="px-4 py-3 text-gray-900">
@@ -340,7 +340,7 @@ function AllowedListPanel() {
                   <td className="px-4 py-3">
                     <button
                       onClick={() => handleToggleActive(item)}
-                      className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                      className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-medium ${
                         item.is_active
                           ? "bg-green-100 text-green-700"
                           : "bg-gray-100 text-gray-500"
@@ -353,13 +353,13 @@ function AllowedListPanel() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleEdit(item)}
-                        className="text-blue-600 hover:text-blue-800 text-xs font-medium"
+                        className="text-blue-600 hover:text-blue-800 text-sm font-medium"
                       >
                         編輯
                       </button>
                       <button
                         onClick={() => handleDelete(item)}
-                        className="text-red-600 hover:text-red-800 text-xs font-medium"
+                        className="text-red-600 hover:text-red-800 text-sm font-medium"
                       >
                         刪除
                       </button>
@@ -435,25 +435,25 @@ function LoginLogPanel() {
     switch (s) {
       case "success":
         return (
-          <span className="inline-block rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
+          <span className="inline-block rounded-full bg-green-100 px-2.5 py-0.5 text-sm font-medium text-green-700">
             成功
           </span>
         );
       case "failed":
         return (
-          <span className="inline-block rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">
+          <span className="inline-block rounded-full bg-red-100 px-2.5 py-0.5 text-sm font-medium text-red-700">
             失敗
           </span>
         );
       case "erp_not_found":
         return (
-          <span className="inline-block rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-700">
+          <span className="inline-block rounded-full bg-yellow-100 px-2.5 py-0.5 text-sm font-medium text-yellow-700">
             ERP 未找到
           </span>
         );
       default:
         return (
-          <span className="inline-block rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+          <span className="inline-block rounded-full bg-gray-100 px-2.5 py-0.5 text-sm font-medium text-gray-600">
             {s}
           </span>
         );
@@ -466,7 +466,7 @@ function LoginLogPanel() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-gray-900">登入紀錄搜尋</h2>
+      <h2 className="text-xl font-semibold text-gray-900">登入紀錄搜尋</h2>
 
       {/* Filters */}
       <form
@@ -474,7 +474,7 @@ function LoginLogPanel() {
         className="rounded-xl bg-white p-4 shadow-sm flex flex-wrap gap-3 items-end"
       >
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-sm font-medium text-gray-500 mb-1">
             Email
           </label>
           <input
@@ -482,17 +482,17 @@ function LoginLogPanel() {
             value={filters.email}
             onChange={(e) => setFilters({ ...filters, email: e.target.value })}
             placeholder="搜尋 Email"
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm w-48 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="rounded-lg border border-gray-300 px-3 py-2 text-base w-52 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-sm font-medium text-gray-500 mb-1">
             狀態
           </label>
           <select
             value={filters.status}
             onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm w-36 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="rounded-lg border border-gray-300 px-3 py-2 text-base w-40 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="">全部</option>
             <option value="success">成功</option>
@@ -501,7 +501,7 @@ function LoginLogPanel() {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-sm font-medium text-gray-500 mb-1">
             開始日期
           </label>
           <input
@@ -510,11 +510,11 @@ function LoginLogPanel() {
             onChange={(e) =>
               setFilters({ ...filters, startDate: e.target.value })
             }
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-sm font-medium text-gray-500 mb-1">
             結束日期
           </label>
           <input
@@ -523,19 +523,19 @@ function LoginLogPanel() {
             onChange={(e) =>
               setFilters({ ...filters, endDate: e.target.value })
             }
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
         <button
           type="submit"
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          className="rounded-lg bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700"
         >
           搜尋
         </button>
         <button
           type="button"
           onClick={handleReset}
-          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          className="rounded-lg border border-gray-300 px-4 py-2 text-base font-medium text-gray-700 hover:bg-gray-50"
         >
           重置
         </button>
@@ -543,16 +543,16 @@ function LoginLogPanel() {
 
       {/* Results */}
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 text-xs text-gray-500">
+        <div className="px-4 py-3 border-b border-gray-100 text-sm text-gray-500">
           共 {total} 筆紀錄
         </div>
         {loading ? (
-          <p className="p-6 text-sm text-gray-500">載入中...</p>
+          <p className="p-6 text-base text-gray-500">載入中...</p>
         ) : logs.length === 0 ? (
-          <p className="p-6 text-sm text-gray-500">無符合條件的紀錄</p>
+          <p className="p-6 text-base text-gray-500">無符合條件的紀錄</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-base">
               <thead className="bg-gray-50 text-left text-gray-500">
                 <tr>
                   <th className="px-4 py-3 font-medium">時間</th>
@@ -567,19 +567,19 @@ function LoginLogPanel() {
               <tbody className="divide-y divide-gray-100">
                 {logs.map((log) => (
                   <tr key={log.uid}>
-                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
                       {formatDate(log.created_at)}
                     </td>
                     <td className="px-4 py-3 text-gray-900">{log.email || "-"}</td>
                     <td className="px-4 py-3 text-gray-900">{log.name || "-"}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-900">
+                    <td className="px-4 py-3 font-mono text-sm text-gray-900">
                       {log.erp_gen01 || "-"}
                     </td>
                     <td className="px-4 py-3 text-gray-900">
                       {log.erp_gem02 || "-"}
                     </td>
                     <td className="px-4 py-3">{statusLabel(log.status)}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">
+                    <td className="px-4 py-3 text-sm text-gray-500">
                       {log.ip_address || "-"}
                     </td>
                   </tr>
@@ -595,17 +595,17 @@ function LoginLogPanel() {
             <button
               disabled={filters.page <= 1}
               onClick={() => setFilters({ ...filters, page: filters.page - 1 })}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               上一頁
             </button>
-            <span className="text-xs text-gray-500">
+            <span className="text-sm text-gray-500">
               第 {filters.page} / {totalPages} 頁
             </span>
             <button
               disabled={filters.page >= totalPages}
               onClick={() => setFilters({ ...filters, page: filters.page + 1 })}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               下一頁
             </button>

@@ -201,15 +201,51 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
     maxAge: SESSION_TTL * 1000,
   });
 
+  // 檢查是否有 SSO 重導目標（來自客戶端 App 的 authorize 流程）
+  const ssoRedirect = req.session.ssoRedirect;
+  if (ssoRedirect) {
+    delete req.session.ssoRedirect;
+
+    // 產生一次性 auth code，帶 code 重導回 client app
+    const authCode = crypto.randomBytes(32).toString('hex');
+    const AUTH_CODE_PREFIX = 'sso:code:';
+    await redis.set(
+      `${AUTH_CODE_PREFIX}${authCode}`,
+      JSON.stringify({
+        userId: sessionData.userId,
+        email: sessionData.email,
+        name: sessionData.name,
+        erpData: sessionData.erpData,
+      }),
+      'EX',
+      60 // 60 秒過期
+    );
+
+    const redirectUrl = new URL(ssoRedirect);
+    redirectUrl.searchParams.set('code', authCode);
+    return res.redirect(redirectUrl.toString());
+  }
+
   res.redirect(config.loginRedirectUrl);
 });
 
 /**
  * GET /api/auth/me
  * 取得目前登入使用者資訊（驗證 JWT + Redis Session）
+ * 支援兩種方式：
+ *   1. Cookie: token（SSO Frontend 使用）
+ *   2. Authorization: Bearer <token>（Client App server-to-server 使用）
  */
 router.get('/me', async (req, res) => {
-  const token = req.cookies.token;
+  // 從 cookie 或 Authorization header 取得 token
+  let token = req.cookies.token;
+  if (!token) {
+    const auth = req.headers.authorization;
+    if (auth && auth.startsWith('Bearer ')) {
+      token = auth.slice(7);
+    }
+  }
+
   if (!token) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
