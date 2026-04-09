@@ -15,8 +15,6 @@ exports.up = (pgm) => {
   `);
 };
 
-exports.down = (pgm) => {
-  pgm.sql(`
-    DELETE FROM sso_allowed_list WHERE domain = 'https://df-sso-management.apps.zerozero.tw'
-  `);
+exports.down = () => {
+  // 不做任何事，保留 management domain
 };
