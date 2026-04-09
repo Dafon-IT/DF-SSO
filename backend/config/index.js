@@ -7,12 +7,6 @@ const config = {
   port: parseInt(process.env.PORT, 10) || 3001,
   nodeEnv: process.env.NODE_ENV || 'development',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
-  // 允許的 CORS origins（逗號分隔），包含 frontendUrl + 所有客戶端 App
-  allowedOrigins: (process.env.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .concat([process.env.FRONTEND_URL || 'http://localhost:3000']),
 
   // Session
   sessionSecret: process.env.SESSION_SECRET,
@@ -69,5 +63,27 @@ const config = {
     password: process.env.ERP_API_PASSWORD,
   },
 };
+
+// ============================================
+// 啟動時驗證必要環境變數
+// ============================================
+
+const required = [
+  ['SESSION_SECRET', config.sessionSecret],
+  ['JWT_SECRET', config.jwtSecret],
+  ['AZURE_CLIENT_ID', config.azure.clientId],
+  ['AZURE_CLIENT_SECRET', config.azure.clientSecret],
+  ['AZURE_TENANT_ID', config.azure.tenantId],
+  ['AZURE_REDIRECT_URI', config.azure.redirectUri],
+  ['PG_DATABASE', config.pg.database],
+  ['PG_USER', config.pg.user],
+  ['PG_PASSWORD', config.pg.password],
+];
+
+const missing = required.filter(([, value]) => !value).map(([name]) => name);
+if (missing.length > 0) {
+  console.error(`\n❌ Missing required environment variables:\n   ${missing.join('\n   ')}\n`);
+  process.exit(1);
+}
 
 module.exports = config;

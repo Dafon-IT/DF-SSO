@@ -85,24 +85,31 @@ router.get('/authorize', async (req, res) => {
  * POST /api/auth/sso/exchange
  * Auth Code 交換端點（server-to-server）：
  * Client App 後端用一次性 auth code 換取用戶資料 + JWT token
+ * 使用 Lua script 確保原子性（防止 race condition 重複使用）
  */
 router.post('/exchange', async (req, res) => {
   const { code } = req.body;
 
-  if (!code) {
-    return res.status(400).json({ error: 'Missing code' });
+  if (!code || typeof code !== 'string' || code.length !== 64) {
+    return res.status(400).json({ error: 'Invalid code format' });
   }
 
-  // 從 Redis 取出並刪除 auth code（一次性使用）
   const key = `${AUTH_CODE_PREFIX}${code}`;
-  const dataStr = await redis.get(key);
+
+  // 使用 Lua script 原子性地 GET + DEL（防止 race condition）
+  const luaScript = `
+    local val = redis.call('GET', KEYS[1])
+    if val then
+      redis.call('DEL', KEYS[1])
+    end
+    return val
+  `;
+
+  const dataStr = await redis.eval(luaScript, 1, key);
 
   if (!dataStr) {
     return res.status(401).json({ error: 'Invalid or expired code' });
   }
-
-  // 立即刪除，確保一次性使用
-  await redis.del(key);
 
   const userData = JSON.parse(dataStr);
 
@@ -118,7 +125,8 @@ router.post('/exchange', async (req, res) => {
 
 /**
  * GET /api/auth/sso/logout?redirect=<url>
- * 全域登出：清除中央 session + token cookie，back-channel 通知所有 client app，重導到指定頁面
+ * 全域登出：清除中央 session + token cookie，back-channel 通知所有 client app
+ * redirect 參數必須在白名單內，防止開放重導向攻擊
  */
 router.get('/logout', async (req, res) => {
   const { redirect } = req.query;
@@ -141,7 +149,7 @@ router.get('/logout', async (req, res) => {
     try {
       const allowedDomains = await allowedListService.findAll();
       const backChannelPromises = allowedDomains
-        .filter((d) => d.domain !== config.frontendUrl) // 排除 SSO Frontend 自己
+        .filter((d) => d.domain !== config.frontendUrl)
         .map((d) =>
           fetch(`${d.domain}/api/auth/back-channel-logout`, {
             method: 'POST',
@@ -159,7 +167,26 @@ router.get('/logout', async (req, res) => {
   }
 
   res.clearCookie('token');
-  res.redirect(redirect || config.frontendUrl);
+
+  // 驗證 redirect 是否在白名單中，防止開放重導向攻擊
+  let safeRedirect = config.frontendUrl;
+  if (redirect) {
+    try {
+      const redirectOrigin = new URL(redirect).origin;
+      const allowedDomains = await allowedListService.findAll();
+      const isAllowed = allowedDomains.some((d) => d.domain === redirectOrigin)
+        || redirectOrigin === config.frontendUrl;
+      if (isAllowed) {
+        safeRedirect = redirect;
+      } else {
+        console.warn(`Blocked redirect to unauthorized origin: ${redirectOrigin}`);
+      }
+    } catch {
+      console.warn(`Invalid redirect URL: ${redirect}`);
+    }
+  }
+
+  res.redirect(safeRedirect);
 });
 
 module.exports = router;
