@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 35890
 
-CMD ["node", "server.js"]
+CMD ["sh", "-c", "DATABASE_URL=postgres://${PG_USER}:${PG_PASSWORD}@${PG_HOST}:${PG_PORT}/${PG_DATABASE} npx node-pg-migrate up && node server.js"]
