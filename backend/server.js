@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
+const RedisStore = require('connect-redis').default;
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
@@ -18,6 +19,9 @@ const db = require('./config/database');
 const redis = require('./config/redis');
 
 const app = express();
+
+// Reverse proxy (Coolify/Nginx) 會設定 X-Forwarded-For
+app.set('trust proxy', 1);
 
 // ============================================
 // 安全中間件
@@ -112,6 +116,7 @@ app.use(cors({
 // ============================================
 
 app.use(session({
+  store: new RedisStore({ client: redis, prefix: 'sess:' }),
   secret: config.sessionSecret,
   resave: false,
   saveUninitialized: false,
