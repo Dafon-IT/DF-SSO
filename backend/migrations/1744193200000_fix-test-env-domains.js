@@ -1,20 +1,12 @@
 exports.shorthands = undefined;
 
 exports.up = (pgm) => {
-  // 刪除錯誤新增的 login domain
+  // 清理錯誤新增的 login domain（若存在）
   pgm.sql(`
     DELETE FROM sso_allowed_list WHERE domain = 'https://df-sso-login.apps.zerozero.tw'
-  `);
-
-  // 確保 management domain 存在
-  pgm.sql(`
-    INSERT INTO sso_allowed_list (domain, name, env, description)
-    VALUES
-      ('https://df-sso-management.apps.zerozero.tw', 'SSO Management', 'test', 'DF-SSO 管理後台 (Test)')
-    ON CONFLICT DO NOTHING
   `);
 };
 
 exports.down = () => {
-  // 不做任何事，保留 management domain
+  // 不需要還原，login domain 本來就不應該存在
 };
