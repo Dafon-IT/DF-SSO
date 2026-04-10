@@ -4,20 +4,20 @@
 
 建立企業統一 SSO（Single Sign-On）單一登入系統：
 
-1. 各子專案透過白名單授權，接入 SSO 中央驗證
-2. **登入 App A → App B 自動登入**（中央 session 共享）
-3. **登出 App A → 僅 App A 登出**，其他子專案與中央 session 不受影響
-4. **SSO Dashboard 登出 → 所有子專案失效**（back-channel 通知）
-5. 子專案整合只需 **5 個檔案 + 3 個環境變數**
+1. 各子專案透過 **OAuth2 Client Credentials**（`app_id` + `app_secret`）接入 SSO 中央
+2. 登入 App-A → App-B **自動登入**（中央 session 共享）
+3. 登出 App-A → SSO **刪除中央 session** + **back-channel 通知所有 App**
+4. 每個 App 可註冊多個 **`redirect_uris`**（dev / test / prod 共用同一組 credentials）
+5. 子專案整合只需 **5 個檔案 + 4 個環境變數**
 
 ---
 
 ## 系統架構
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           使用者瀏覽器                                  │
-└──────┬──────────────┬──────────────┬────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                           使用者瀏覽器                               │
+└──────┬──────────────┬──────────────┬────────────────────────────────┘
        │              │              │
        ▼              ▼              ▼
 ┌──────────────┐ ┌──────────┐ ┌──────────┐
@@ -25,36 +25,33 @@
 │  (Next.js)   │ │(Next.js) │ │(Next.js) │
 │  Port 3000   │ │Port 3100 │ │Port 3200 │
 │              │ │          │ │          │
-│ ‧管理後台    │ │ ‧自己的   │ │ ‧自己的   │
-│ ‧白名單 CRUD │ │  登入頁   │ │  登入頁   │
+│ ‧管理後台    │ │ ‧本地 token│ │ ‧本地 token│
+│ ‧應用程式管理 │ │  cookie   │ │  cookie   │
 │ ‧登入紀錄    │ │ ‧API routes│ │ ‧API routes│
-└──────┬───────┘ └────┬─────┘ └────┬─────┘
-       │              │            │
+│ ‧管理員管理  │ └────┬─────┘ └────┬─────┘
+└──────┬───────┘      │            │
        │    ┌─────────┴────────────┘
        │    │  server-to-server
-       ▼    ▼  (auth code exchange / Bearer token)
+       ▼    ▼  (code exchange + client credentials / Bearer token)
 ┌──────────────────────────────────┐
 │    SSO Backend (Express.js)      │
-│    Port 3001                     │
+│    Port 35890                    │
+│                                  │
+│  OAuth2 Authorization Server：   │
+│  ‧app_id + app_secret 管理      │
+│  ‧redirect_uris 多環境註冊      │
+│  ‧HMAC-SHA256 back-channel 簽章 │
+│  ‧timingSafeEqual 防 timing attack│
+│  ‧Auth Code Lua 原子操作         │
 │                                  │
 │  安全機制：                       │
 │  ‧Helmet (安全 headers)          │
-│  ‧Rate Limiting (防暴力攻擊)     │
-│  ‧CORS 動態白名單 (從 DB 載入)   │
-│  ‧重導向白名單驗證 (防 open redirect) │
-│  ‧Auth Code 原子操作 (防 race condition) │
+│  ‧Rate Limiting（分層）          │
+│  ‧CORS 動態白名單 (redirect_uris)│
+│  ‧重導向白名單驗證               │
+│  ‧Session fixation 防護          │
 │  ‧環境變數啟動驗證               │
 │  ‧Graceful Shutdown              │
-│                                  │
-│  /api/auth/{segment}/login       │ ← Microsoft OAuth 登入
-│  /api/auth/{segment}/redirect    │ ← OAuth 回調
-│  /api/auth/me                    │ ← 驗證（Cookie 或 Bearer）
-│  /api/auth/logout                │ ← SSO Dashboard 登出
-│  /api/auth/sso/authorize         │ ← 子專案授權入口
-│  /api/auth/sso/exchange          │ ← auth code 交換 token
-│  /api/auth/sso/logout            │ ← 全域登出 + back-channel
-│  /api/allowed-list               │ ← 白名單 CRUD
-│  /api/login-log                  │ ← 登入紀錄搜尋
 └────┬────────┬─────────┬──────────┘
      │        │         │
 ┌────▼───┐ ┌──▼─────┐ ┌─▼──────────┐
@@ -73,35 +70,36 @@
 
 ## SSO 核心流程
 
-### 子專案登入流程（以 App-A 為例）
+### 登入流程
 
 ```
-使用者訪問 App-A → 呼叫本地 /api/auth/me → 無 token → 顯示登入頁
-        │
-        ▼  使用者點「透過 DF-SSO 登入」
-[1] 瀏覽器導向 SSO Backend
-    GET /api/auth/sso/authorize?app=App A&redirect_uri=http://localhost:3100/api/auth/callback
+使用者訪問 App-A → /api/auth/me → 無 token → 401 "no_token" → 自動導向 SSO
         │
         ▼
-[2] SSO Backend 驗證
-    - 用 app 參數查 sso_allowed_list.name → 找到記錄
-    - 驗證 redirect_uri origin 與 domain 匹配
+[1] 瀏覽器導向 SSO Backend
+    GET /api/auth/sso/authorize?client_id={app_id}&redirect_uri={APP_URL}/api/auth/callback
+        │
+        ▼
+[2] SSO 驗證
+    - 用 client_id 查 sso_allowed_list.app_id
+    - 驗證 redirect_uri origin 在 redirect_uris[] 中
     - 檢查是否已有中央 session（JWT cookie + Redis）
         │
         ├─ 已有 session ──→ [5] 直接產生 auth code（免登入！）
         │
         ▼  無 session
 [3] 重導向到 Microsoft 登入頁
-    - 記住 ssoRedirect = redirect_uri
-    - 使用者完成 Microsoft 認證
+    - session 記住 ssoRedirect = redirect_uri
+    - session.regenerate() 防 session fixation
         │
         ▼
 [4] OAuth 回調
     - 用 authorization code 換取 tokens
+    - state 用 timingSafeEqual 比對（防 CSRF）
     - 查詢 ERP API 取得員工資料
     - 寫入 sso_login_log
-    - 產生 JWT + 寫入 Redis Session
-    - 設定 httpOnly cookie
+    - 產生 JWT + 寫入 Redis Session (24h TTL)
+    - 設定 httpOnly cookie (domain: .apps.zerozero.tw)
         │
         ▼
 [5] 產生一次性 Auth Code
@@ -111,101 +109,104 @@
         │
         ▼
 [6] App-A /api/auth/callback 接收 code
-    - Server-to-server POST SSO /api/auth/sso/exchange { code }
-    - SSO 使用 Lua script 原子性 GET+DEL（防止重複使用）
+    - POST SSO /api/auth/sso/exchange { code, client_id, client_secret }
+    - SSO 用 timingSafeEqual 驗證 client_secret
+    - SSO 用 Lua script 原子性 GET+DEL auth code
     - 回傳 { user, token }
-    - App-A 將 token 存入 httpOnly cookie（sso_token）
-    - 重導向到 /dashboard
+    - App-A 將 token 存入 httpOnly cookie（本地 domain）
+    - 重導向 /dashboard
         │
         ▼
 [7] App-A Dashboard
-    - 呼叫本地 /api/auth/me
-    - 本地 API route：讀 sso_token → Bearer 轉發 SSO /api/auth/me
+    - /api/auth/me → 讀本地 token → Bearer 轉發 SSO /api/auth/me
     - SSO 驗證 JWT + Redis Session → 回傳用戶資料
 ```
 
-### 跨應用自動登入（SSO）
+### 跨應用自動登入
 
 ```
-使用者已登入 App-A，訪問 App-B：
-
-App-B → /api/auth/me → 無 sso_token → 顯示登入頁
-  → 點登入 → SSO /authorize?app=App B&redirect_uri=...
-  → SSO 檢查中央 session → 已登入 ✅
-  → 直接產生 auth code（不碰 Microsoft 登入頁！）
-  → App-B exchange → 存 token → Dashboard ✅
+已登入 App-A，訪問 App-B → /api/auth/me → 401 "no_token"
+  → 自動導向 SSO /authorize?client_id={app_b_id}
+  → SSO 有中央 session → 直接產生 auth code（不碰 Microsoft！）
+  → App-B exchange { code, client_id, client_secret } → 存 token → Dashboard
 ```
 
-### 子專案登出（不影響其他 App）
+### 登出流程
 
 ```
-App-A 點登出
-  → /api/auth/logout → 清 App-A 的 sso_token → 回 App-A 首頁
-  → SSO 中央 session 不受影響
-  → App-B 仍然登入 ✅
-  → App-A 重新登入 → SSO 有 session → 自動登入 ✅
+App-A 點登出 → /api/auth/logout
+  → 讀本地 token → POST SSO /api/auth/logout (Bearer)
+  → SSO 刪除 Redis session
+  → SSO back-channel POST 所有 App /api/auth/back-channel-logout
+    { user_id, timestamp, signature }  ← HMAC-SHA256(app_secret, user_id:timestamp)
+  → App-A 清除本地 cookie → redirect /?logged_out=1
+  → App-B 下次 /me → SSO 回 401 → 清本地 token → 顯示登入按鈕
 ```
 
-### SSO Dashboard 全域登出
+### Session 過期
 
 ```
-SSO Dashboard 點登出
-  → SSO /api/auth/sso/logout
-  → 刪除 Redis session + 清 cookie
-  → Back-channel POST 所有子專案 /api/auth/back-channel-logout
-  → 所有 App 下次 /me 呼叫 → SSO 回 401 → 回登入頁 ✅
+/api/auth/me → SSO Redis session 過期 → 401 "session_expired"
+  → Client 清除本地 token → 回首頁
+  → /api/auth/me → "no_token"（不是 session_expired）
+  → 自動導向 SSO → SSO 有中央 cookie → 靜默重新登入
 ```
 
 ---
 
 ## 安全機制
 
-### 1. Helmet（安全 HTTP Headers）
+| 機制 | 說明 |
+|------|------|
+| **OAuth2 Client Credentials** | 每個 App 有 `app_id`（公開）+ `app_secret`（保密），exchange 時驗證 |
+| **timingSafeEqual** | client_secret、OAuth state 比對使用常數時間，防 timing attack |
+| **HMAC-SHA256 簽章** | back-channel logout 帶 `signature = HMAC(app_secret, user_id:timestamp)`，Client 驗證防偽造 |
+| **Timestamp 驗證** | back-channel 簽章含 timestamp，30 秒內有效，防 replay attack |
+| **Auth Code 原子操作** | Redis Lua script `GET+DEL`，防同一 code 重複使用 |
+| **Session fixation 防護** | 登入成功後 `req.session.regenerate()` 重新產生 session ID |
+| **Redirect 白名單** | authorize 的 `redirect_uri` 和 logout 的 `redirect` 都驗證 `redirect_uris[]` |
+| **Protocol 限制** | logout redirect 只允許 `http:` / `https:` 協定，防 `javascript:` 注入 |
+| **Secret 遮蔽** | API 列表只回傳 `app_secret_last4`，完整 secret 需管理員呼叫 `/credentials` |
+| **Helmet** | X-Content-Type-Options、X-Frame-Options、HSTS 等安全 headers |
+| **Rate Limiting** | 分層限制（見下表） |
+| **Body Size Limit** | `express.json()` 限制 1MB |
+| **Graceful Shutdown** | SIGTERM/SIGINT → 停止接受新連線 → 等待完成 → 關閉 DB/Redis |
 
-自動設定：X-Content-Type-Options、X-Frame-Options、Strict-Transport-Security 等。
-
-### 2. Rate Limiting
+### Rate Limiting
 
 | 範圍 | 限制 | 說明 |
 |------|------|------|
-| 全域 | 500 次 / 15 分鐘 | 防止 DoS |
-| Auth 端點 | 30 次 / 15 分鐘 | 防暴力登入 |
-| Exchange 端點 | 20 次 / 1 分鐘 | 防 auth code 猜測 |
-
-### 3. CORS 動態白名單
-
-從 DB `sso_allowed_list` 動態載入允許的 origin（1 分鐘快取）。新增白名單即自動允許 CORS。
-
-### 4. 重導向白名單驗證
-
-所有 redirect 參數（authorize 的 `redirect_uri`、logout 的 `redirect`）都必須經過白名單驗證，防止開放重導向攻擊。
-
-### 5. Auth Code 原子操作
-
-使用 Redis Lua script 原子性 `GET + DEL`，防止同一 auth code 被重複使用（race condition）。
-
-### 6. 環境變數啟動驗證
-
-伺服器啟動時檢查所有必要環境變數（`SESSION_SECRET`、`JWT_SECRET`、Azure AD、DB），缺少則立即退出。
-
-### 7. Graceful Shutdown
-
-收到 `SIGTERM`/`SIGINT` 時優雅關閉：停止接受新連線 → 等待進行中請求完成 → 關閉 DB/Redis → 退出。
-
-### 8. Body Size Limit
-
-`express.json()` 限制 1MB，防止大 payload DoS。
-
-### 9. Global Error Handler
-
-- 未捕獲的 Promise rejection → 記錄日誌
-- 未捕獲的 Exception → 記錄日誌 + 觸發 graceful shutdown
-- 404 → JSON 回應
-- CORS 錯誤 → 403 JSON 回應
+| 全域 | 500 / 15min | 防 DoS |
+| Auth（login/redirect/authorize） | 30 / 15min | 防暴力登入 |
+| Session（/me、POST /logout） | 100 / 15min | Client App 高頻 server-to-server |
+| Exchange | 20 / 1min | 防 auth code 猜測 |
 
 ---
 
 ## 資料庫設計
+
+### sso_allowed_list（應用程式白名單）
+
+| 欄位 | 型態 | 說明 |
+|------|------|------|
+| `ppid` | SERIAL PK | 自動遞增主鍵 |
+| `uid` | UUID | UUIDv7 |
+| `domain` | VARCHAR(255) | 主要網域（UNIQUE when not deleted） |
+| `name` | VARCHAR(255) | App 顯示名稱 |
+| `description` | TEXT | 說明 |
+| `app_id` | UUID | OAuth2 Client ID（自動產生，UNIQUE） |
+| `app_secret` | VARCHAR(64) | OAuth2 Client Secret（自動產生，64 char hex） |
+| `redirect_uris` | TEXT[] | 允許的 redirect_uri origins（dev/test/prod） |
+| `is_active` | BOOLEAN | 是否啟用 |
+| `is_deleted` | BOOLEAN | 軟刪除 |
+| `created_at` / `updated_at` | TIMESTAMPTZ | 含時區 |
+
+**白名單用途：**
+1. **OAuth2 授權** — `client_id` 查找 + `redirect_uri` 驗證 `redirect_uris[]`
+2. **Code exchange** — 驗證 `client_id` + `client_secret`
+3. **CORS** — 從所有 App 的 `redirect_uris[]` 收集 origins + `FRONTEND_URL`
+4. **Back-channel** — 從 `redirect_uris[]` 收集 origins + 對應的 `app_secret` 產生 HMAC
+5. **Redirect 驗證** — logout redirect 必須在 `redirect_uris[]` 中
 
 ### sso_login_log（登入紀錄）
 
@@ -216,256 +217,110 @@ SSO Dashboard 點登出
 | `azure_oid` | VARCHAR(255) | Microsoft AD Object ID |
 | `email` | VARCHAR(255) | 使用者 Email |
 | `name` | VARCHAR(255) | 顯示名稱 |
-| `preferred_username` | VARCHAR(255) | Microsoft 使用者名稱 |
 | `erp_gen01` ~ `erp_gen06` | VARCHAR | ERP 員工資料 |
 | `status` | VARCHAR(20) | `success` / `failed` / `erp_not_found` |
 | `error_message` | TEXT | 錯誤訊息 |
 | `ip_address` | VARCHAR(45) | 來源 IP |
 | `user_agent` | TEXT | User Agent |
-| `created_at` / `updated_at` | TIMESTAMP | UTC+8 |
+| `created_at` / `updated_at` | TIMESTAMPTZ | 含時區 |
 
-**索引：** `email`, `status`, `created_at`, `uid`
-
-### sso_allowed_list（白名單）
+### sso_admin_manager（管理員）
 
 | 欄位 | 型態 | 說明 |
 |------|------|------|
 | `ppid` | SERIAL PK | 自動遞增主鍵 |
 | `uid` | UUID | UUIDv7 |
-| `domain` | VARCHAR(255) | 網域（如 `https://asset.df-recycle.com.tw`） |
-| `name` | VARCHAR(255) | App 識別名稱（如 `App A`），用於 authorize 的 `app` 參數 |
-| `description` | TEXT | 說明 |
+| `azure_oid` | VARCHAR(255) | Microsoft AD Object ID（首次登入後填入） |
+| `email` | VARCHAR(255) | Email（UNIQUE when not deleted） |
+| `name` | VARCHAR(255) | 顯示名稱 |
 | `is_active` | BOOLEAN | 是否啟用 |
-| `is_deleted` | BOOLEAN | 是否已刪除 |
-| `created_at` / `updated_at` | TIMESTAMP | UTC+8 |
-
-**索引：** `domain`（UNIQUE，`is_deleted = FALSE`）, `uid`
-
-**白名單三重用途：**
-1. **SSO 授權驗證** — authorize 用 `name` 查找 + 驗證 `redirect_uri` origin
-2. **CORS 動態管理** — 從 DB 載入所有啟用的 `domain`
-3. **重導向驗證** — logout redirect 必須在白名單 domain 內
+| `is_newer` | BOOLEAN | 是否尚未登入 |
+| `is_deleted` | BOOLEAN | 軟刪除 |
 
 ---
 
 ## Redis 設計
 
-### 中央 Session
-
-```
-Key:    sso:session:{userId}
-TTL:    24 小時
-Value:  { userId, email, name, erpData, loginLogUid, loginAt }
-```
-
-### 一次性 Auth Code
-
-```
-Key:    sso:code:{隨機 32 bytes hex}
-TTL:    60 秒
-Value:  { userId, email, name, erpData }
-操作:   Lua script 原子性 GET+DEL（防重複使用）
-```
+| Key | TTL | Value | 說明 |
+|-----|-----|-------|------|
+| `sso:session:{userId}` | 24h | `{ userId, email, name, erpData, loginLogUid, loginAt }` | 中央 session |
+| `sso:code:{hex64}` | 60s | `{ userId, email, name, erpData }` | 一次性 auth code（Lua GET+DEL） |
+| `sess:{sessionId}` | 10min | Express session data | OAuth state + ssoRedirect |
 
 ---
 
-## 後端 API
+## API 端點
+
+### SSO 授權（OAuth2）
+
+| Method | Path | Rate Limit | 說明 |
+|--------|------|------------|------|
+| GET | `/api/auth/sso/authorize` | 30/15min | `?client_id=&redirect_uri=` 授權入口 |
+| POST | `/api/auth/sso/exchange` | 20/1min | `{ code, client_id, client_secret }` 換 token |
+| GET | `/api/auth/sso/logout` | 30/15min | 全域登出 + HMAC back-channel |
 
 ### Auth 認證
 
 | Method | Path | Rate Limit | 說明 |
 |--------|------|------------|------|
-| GET | `/api/auth/{segment}/login` | 30/15min | Microsoft OAuth 登入 |
-| GET | `/api/auth/{segment}/redirect` | 30/15min | OAuth 回調 |
-| GET | `/api/auth/me` | 30/15min | 驗證（Cookie 或 Bearer header） |
-| POST | `/api/auth/logout` | 30/15min | SSO Dashboard 登出 |
+| GET | `/api/auth/{authPath}/login` | 30/15min | Microsoft OAuth 登入 |
+| GET | `/api/auth/{authPath}/redirect` | 30/15min | OAuth 回調 |
+| GET | `/api/auth/me` | 100/15min | 驗證 JWT + Redis（Cookie 或 Bearer） |
+| POST | `/api/auth/logout` | 100/15min | 登出（Bearer + HMAC back-channel） |
 
-### SSO 跨應用
-
-| Method | Path | Rate Limit | 說明 |
-|--------|------|------------|------|
-| GET | `/api/auth/sso/authorize` | 30/15min | 子專案授權（查白名單 → auth code 或 Microsoft 登入） |
-| POST | `/api/auth/sso/exchange` | 20/1min | Auth code 交換 token（原子操作） |
-| GET | `/api/auth/sso/logout` | 30/15min | 全域登出 + back-channel（redirect 驗證白名單） |
-
-### 白名單 CRUD
+### 應用程式管理（Admin）
 
 | Method | Path | 說明 |
 |--------|------|------|
-| GET | `/api/allowed-list` | 取得所有（含 inactive） |
-| POST | `/api/allowed-list` | 新增（自動恢復軟刪除） |
-| PUT | `/api/allowed-list/:uid` | 更新 |
+| GET | `/api/allowed-list` | 取得所有 App（secret 遮蔽） |
+| GET | `/api/allowed-list/:uid` | 取得單筆（secret 遮蔽） |
+| POST | `/api/allowed-list` | 新增 App（自動產生 app_id + app_secret） |
+| PUT | `/api/allowed-list/:uid` | 更新（domain/name/redirect_uris/is_active） |
 | DELETE | `/api/allowed-list/:uid` | 軟刪除 |
+| GET | `/api/allowed-list/:uid/credentials` | 取得完整 app_id + app_secret |
+| POST | `/api/allowed-list/:uid/regenerate-secret` | 重新產生 app_secret |
 
-### 登入紀錄
-
-| Method | Path | 參數 |
-|--------|------|------|
-| GET | `/api/login-log` | `email`, `status`, `startDate`, `endDate`, `page`, `pageSize` |
-
-### Health Check
+### 其他
 
 | Method | Path | 說明 |
 |--------|------|------|
-| GET | `/api/health` | PostgreSQL + Redis 狀態（200 OK / 503 degraded） |
-
----
-
-## 子專案整合指南
-
-### 需要的檔案（5 個）
-
-```
-lib/sso.ts                              ← SSO token cookie 工具（35 行）
-app/api/auth/callback/route.ts          ← 登入回調：exchange code → 存 token
-app/api/auth/me/route.ts                ← 驗證：Bearer 轉發 SSO /me
-app/api/auth/logout/route.ts            ← 登出：清本地 token → 回首頁
-app/api/auth/back-channel-logout/route.ts ← 接收全域登出通知
-```
-
-### 環境變數
-
-```env
-# Server-side（API route 用）
-SSO_URL=https://sso-api.df-recycle.com.tw
-APP_URL=https://asset.df-recycle.com.tw
-SESSION_SECRET=<隨機產生>
-
-# Client-side（打包進 JS）
-NEXT_PUBLIC_SSO_URL=https://sso-api.df-recycle.com.tw
-NEXT_PUBLIC_APP_URL=https://asset.df-recycle.com.tw
-NEXT_PUBLIC_APP_NAME=App A
-```
-
-### 前端整合
-
-```tsx
-// 登入
-const handleLogin = () => {
-  window.location.href = `${SSO_URL}/api/auth/sso/authorize?app=${encodeURIComponent(APP_NAME)}&redirect_uri=${encodeURIComponent(`${APP_URL}/api/auth/callback`)}`;
-};
-
-// 驗證
-fetch("/api/auth/me").then(res => res.ok ? res.json() : Promise.reject())
-  .then(data => setUser(data.user))
-  .catch(() => router.push("/"));
-
-// 登出（僅清本地 token，不動中央 session）
-window.location.href = "/api/auth/logout";
-```
-
-### 白名單設定
-
-在 SSO Dashboard 新增：
-- **網域：** `https://asset.df-recycle.com.tw`
-- **名稱：** `App A`（與 `NEXT_PUBLIC_APP_NAME` 一致）
-- **說明：** 資產管理系統
-
-新增後 CORS 自動允許（最多 1 分鐘延遲）。
-
----
-
-## 專案結構
-
-```
-DF-SSO/
-├── backend/                          # SSO 中央伺服器 (Express, port 3001)
-│   ├── config/
-│   │   ├── database.js               # PostgreSQL 連線
-│   │   ├── index.js                  # 環境變數集中管理 + 啟動驗證
-│   │   ├── msal.js                   # Microsoft MSAL 設定
-│   │   └── redis.js                  # Redis 連線
-│   ├── routes/
-│   │   ├── auth.js                   # Microsoft OAuth + /me + /logout
-│   │   ├── sso.js                    # SSO 跨應用：authorize/exchange/logout
-│   │   ├── allowedList.js            # 白名單 CRUD
-│   │   └── loginLog.js              # 登入紀錄搜尋
-│   ├── services/
-│   │   ├── allowedList.js            # 白名單 DB（含 findByName）
-│   │   ├── erpApi.js                 # ERP API 串接
-│   │   └── loginLog.js              # 登入紀錄 DB
-│   ├── migrations/                   # DB 遷移
-│   ├── sql/init.sql                  # 完整 Schema
-│   ├── server.js                     # Express（Helmet/RateLimit/CORS/Morgan/Graceful Shutdown）
-│   └── .env.example
-│
-├── frontend/                         # SSO 管理後台 (Next.js, port 3000)
-│   └── src/app/
-│       ├── page.tsx                  # 管理員登入頁
-│       └── dashboard/page.tsx        # 白名單管理 + 登入紀錄搜尋
-│
-├── app-a/                            # 範例子專案：資產管理系統 (port 3100)
-│   ├── lib/sso.ts                    # SSO token cookie 工具
-│   ├── app/
-│   │   ├── api/auth/                 # SSO 整合 API routes
-│   │   │   ├── callback/route.ts
-│   │   │   ├── me/route.ts
-│   │   │   ├── logout/route.ts
-│   │   │   └── back-channel-logout/route.ts
-│   │   ├── page.tsx                  # 登入頁
-│   │   └── dashboard/page.tsx        # 資產管理 Dashboard
-│   └── .env.local
-│
-├── app-b/                            # 範例子專案：報修系統 (port 3200)
-│   └── ...                           # 同 app-a 結構
-│
-└── docs/Design.md                    # 本文件
-```
+| GET | `/api/login-log` | 登入紀錄搜尋（email/status/date/page） |
+| GET/POST/PUT/DELETE | `/api/admin-manager` | 管理員 CRUD |
+| GET | `/api/health` | PostgreSQL + Redis 狀態 |
+| GET | `/api/docs` | Swagger API 文件 |
 
 ---
 
 ## 環境變數
 
-### SSO Backend（必填標記 ✱）
+### SSO Backend（✱ = 必填）
 
 | 變數 | 說明 |
 |------|------|
-| `PORT` | 後端 Port（預設 3001） |
+| `PORT` | 後端 Port（預設 3001，prod 35890） |
 | `NODE_ENV` | `development` / `production` |
-| `FRONTEND_URL` | SSO Frontend URL |
+| `FRONTEND_URL` | SSO Frontend URL（CORS 永遠允許） |
 | ✱ `SESSION_SECRET` | Express Session 密鑰 |
 | ✱ `JWT_SECRET` | JWT 簽名密鑰 |
 | `JWT_EXPIRES_IN` | JWT 過期時間（預設 24h） |
-| ✱ `AZURE_CLIENT_ID` | Azure AD Application ID |
-| ✱ `AZURE_CLIENT_SECRET` | Azure AD Client Secret |
-| ✱ `AZURE_TENANT_ID` | Azure AD Tenant ID |
+| ✱ `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID` | Azure AD |
 | ✱ `AZURE_REDIRECT_URI` | OAuth Redirect URI |
-| `ROPC_REDIRECT_URL` | Dashboard 登入後導向 |
+| `COOKIE_DOMAIN` | 共用 cookie domain（如 `.apps.zerozero.tw`） |
 | ✱ `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | PostgreSQL |
-| `PG_HOST` / `PG_PORT` / `PG_SCHEMA` | PostgreSQL（有預設值） |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_DB` | Redis（有預設值） |
-| `ERP_API_LOGIN_URL` / `ERP_API_SEARCH_URL` | ERP API（選填） |
-| `ERP_API_ACCOUNT` / `ERP_API_PASSWORD` | ERP API（選填） |
+| `ERP_API_*` | ERP API（選填） |
 
-> **CORS 不需要環境變數**，從 DB 白名單自動載入。
-
-### SSO Frontend
-
-| 變數 | 說明 |
-|------|------|
-| `NEXT_PUBLIC_API_URL` | SSO Backend URL |
-| `NEXT_PUBLIC_AUTH_PATH` | OAuth 路徑段 |
-
-### 子專案
+### Client App
 
 | 變數 | 說明 |
 |------|------|
 | `SSO_URL` | SSO Backend URL（server-side） |
-| `APP_URL` | 本 App URL（server-side） |
-| `SESSION_SECRET` | 本 App session 密鑰 |
+| `SSO_APP_ID` | 從白名單取得的 app_id（server-side） |
+| `SSO_APP_SECRET` | 從白名單取得的 app_secret（server-side，保密） |
+| `APP_URL` | 本 App URL（各環境各自設） |
 | `NEXT_PUBLIC_SSO_URL` | SSO Backend URL（client-side） |
-| `NEXT_PUBLIC_APP_URL` | 本 App URL（client-side） |
-| `NEXT_PUBLIC_APP_NAME` | 對應白名單 `name` 欄位 |
-
----
-
-## 部署注意事項
-
-1. **Azure AD**：正式域名需加到 Azure Portal 的 Redirect URIs
-2. **白名單 DB**：部署後更新 `sso_allowed_list` 為正式域名
-3. **HTTPS**：`NODE_ENV=production` 時 cookie 自動啟用 `secure: true`
-4. **NEXT_PUBLIC_**：這些是 build time 變數，需設在 CI/CD 的 build 環境
-5. **密鑰**：所有 `SECRET` 變數必須使用隨機產生的強密鑰，不可共用
+| `NEXT_PUBLIC_SSO_APP_ID` | 同 SSO_APP_ID（client-side，公開） |
+| `NEXT_PUBLIC_APP_URL` | 同 APP_URL（client-side） |
 
 ---
 
@@ -475,10 +330,10 @@ DF-SSO/
 |------|------|
 | SSO Frontend | Next.js + TypeScript + Tailwind CSS |
 | SSO Backend | Node.js + Express.js |
-| 安全 | Helmet + express-rate-limit + CORS 動態白名單 |
-| 日誌 | Morgan (request logging) |
-| 認證 | Microsoft Azure AD (OAuth 2.0) |
-| 資料庫 | PostgreSQL |
-| Session / 快取 | Redis |
-| Token | JWT (jsonwebtoken) |
-| MSAL | @azure/msal-node |
+| 安全 | Helmet + express-rate-limit + CORS 動態白名單 + HMAC-SHA256 |
+| 認證 | Microsoft Azure AD (OAuth 2.0 + MSAL) |
+| 資料庫 | PostgreSQL 16 |
+| Session / 快取 | Redis 7 (ioredis) |
+| Token | JWT (HS256, 24h) |
+| 部署 | Coolify + Docker Compose |
+| API 文件 | Swagger (swagger-jsdoc + swagger-ui-express) |

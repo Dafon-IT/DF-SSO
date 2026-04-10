@@ -8,48 +8,53 @@
 
 ### 1. 向 SSO 管理員申請 App
 
-到 SSO Dashboard 的白名單管理新增你的專案，SSO 會自動產生 `app_id` + `app_secret`：
+到 SSO Dashboard 的**應用程式管理**新增你的專案：
 
 | 欄位 | 說明 | 範例 |
 |------|------|------|
-| **名稱** | App 顯示名稱 | `倉儲系統` |
 | **網域** | 主要 domain（含 `https://`） | `https://warehouse.apps.zerozero.tw` |
-| **redirect_uris** | 所有環境的 origin（dev/test/prod） | `http://localhost:3100`, `https://warehouse.apps.zerozero.tw` |
+| **系統名稱** | 顯示名稱 | `倉儲系統` |
+| **說明** | 用途描述 | `大豐倉儲管理系統` |
+| **Redirect URIs** | 所有環境的 origin | `http://localhost:3100`、`https://warehouse.apps.zerozero.tw` |
 
-建立後你會取得：
+建立後 SSO 自動產生：
 - **`app_id`** — UUID，公開的 client identifier
-- **`app_secret`** — 64 字元隨機字串，保密，用於 server-to-server exchange
+- **`app_secret`** — 64 字元，保密，用於 server-to-server exchange
 
-### 2. 確認 SSO Backend URL
+在 Dashboard 點擊「**顯示金鑰**」即可複製完整的 `app_id` + `app_secret`。
 
-- Test：`https://df-sso-login-test.apps.zerozero.tw`
-- 本機開發：`http://localhost:3001`
+### 2. SSO Backend URL
+
+| 環境 | URL |
+|------|-----|
+| Test | `https://df-sso-login-test.apps.zerozero.tw` |
+| 本機 | `http://localhost:3001` |
 
 ---
 
 ## 設定環境變數
 
 ```env
-# Server-side（runtime）
+# Server-side（runtime，保密）
 SSO_URL=https://df-sso-login-test.apps.zerozero.tw
-SSO_APP_ID=<從白名單取得的 app_id>
-SSO_APP_SECRET=<從白名單取得的 app_secret>
+SSO_APP_ID=<app_id>
+SSO_APP_SECRET=<app_secret>
 APP_URL=https://warehouse.apps.zerozero.tw
 
-# Client-side（build time，Next.js 用）
+# Client-side（build time，公開）
 NEXT_PUBLIC_SSO_URL=https://df-sso-login-test.apps.zerozero.tw
 NEXT_PUBLIC_SSO_APP_ID=<同 SSO_APP_ID>
 NEXT_PUBLIC_APP_URL=https://warehouse.apps.zerozero.tw
 ```
 
-> `app_id` + `app_secret` 跨環境共用（dev/test/prod 同一組），只需改 `APP_URL`。
+> `app_id` + `app_secret` **跨環境共用**（dev/test/prod 同一組），只需改 `APP_URL`。
 > `APP_URL` 的 origin 必須在白名單的 `redirect_uris` 中。
 
 ---
 
 ## 建立檔案
 
-你的專案需要 **1 個工具檔 + 4 個 API Route**。以下以 Next.js App Router 為範例，其他框架請參考「非 Next.js 專案」段落。
+你的專案需要 **1 個工具檔 + 4 個 API Route**。
 
 ### `lib/sso.ts`
 
@@ -78,8 +83,6 @@ export async function fetchSSO(path: string, init?: RequestInit): Promise<Respon
 ```
 
 ### `app/api/auth/callback/route.ts`
-
-用 auth code + client credentials 向 SSO 換取 JWT token。
 
 ```typescript
 import { NextRequest, NextResponse } from "next/server";
@@ -117,8 +120,6 @@ export async function GET(request: NextRequest) {
 
 ### `app/api/auth/me/route.ts`
 
-前端呼叫此 API 確認登入狀態。
-
 ```typescript
 import { NextResponse } from "next/server";
 import { getToken, fetchSSO } from "../../../../lib/sso";
@@ -145,8 +146,6 @@ export async function GET() {
 
 ### `app/api/auth/logout/route.ts`
 
-通知 SSO 刪除 session，清除本地 cookie。
-
 ```typescript
 import { NextResponse } from "next/server";
 import { getToken, fetchSSO } from "../../../../lib/sso";
@@ -171,8 +170,7 @@ export async function GET() {
 
 ### `app/api/auth/back-channel-logout/route.ts`
 
-接收 SSO 的登出通知（當其他 App 登出時觸發）。
-SSO 會在 request body 附帶 HMAC-SHA256 簽章，**務必驗證**以防偽造登出攻擊。
+SSO 登出時會帶 HMAC-SHA256 簽章，驗證後可確認請求來自 SSO。
 
 ```typescript
 import { NextRequest, NextResponse } from "next/server";
@@ -211,14 +209,13 @@ export async function POST(request: NextRequest) {
   }
 
   console.log(`[Back-channel Logout] User ${user_id} logged out from SSO`);
-  // TODO: 在此清除該用戶的本地 session / cache
   return NextResponse.json({ success: true });
 }
 ```
 
 ---
 
-## 寫登入頁
+## 登入頁
 
 ```tsx
 "use client";
@@ -246,7 +243,7 @@ export default function LoginPage() {
         if (data.error === "session_expired" || error || loggedOut) {
           setChecking(false);  // 顯示登入按鈕
         } else {
-          window.location.href = ssoUrl;  // 自動導向 SSO（跨 App 免登入）
+          window.location.href = ssoUrl;  // no_token → 自動導向 SSO
         }
       })
       .catch(() => setChecking(false));
@@ -263,37 +260,14 @@ export default function LoginPage() {
 }
 ```
 
-> **`no_token`** → 自動導向 SSO（實現跨 App 免登入）
+> **`no_token`** → 自動導向 SSO（跨 App 免登入）
 > **`session_expired`** → 顯示按鈕（避免被登出後無限重導）
 
 ---
 
-## 取得用戶資料
+## 用戶資料格式
 
-在受保護的頁面呼叫 `/api/auth/me`：
-
-```tsx
-"use client";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-
-export default function DashboardPage() {
-  const router = useRouter();
-  const [user, setUser] = useState(null);
-
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((res) => { if (!res.ok) throw new Error(); return res.json(); })
-      .then((data) => setUser(data.user))
-      .catch(() => router.push("/"));
-  }, [router]);
-
-  if (!user) return <p>載入中...</p>;
-  return <div>歡迎，{user.name}（{user.email}）</div>;
-}
-```
-
-回傳格式：
+`/api/auth/me` 回傳：
 
 ```json
 {
@@ -313,26 +287,26 @@ export default function DashboardPage() {
 }
 ```
 
-> `erpData` 可能為 `null`（ERP 查無該 email 的員工資料）。
+> `erpData` 可能為 `null`。
 
 ---
 
 ## 非 Next.js 專案
 
-SSO 整合的核心是 4 個 HTTP 端點，任何後端框架都能實作：
+任何後端框架都能實作，核心是 4 個 HTTP 端點：
 
 | 端點 | 做什麼 |
 |------|--------|
-| `GET /api/auth/callback?code=xxx` | POST `SSO_URL/api/auth/sso/exchange` `{ code, client_id, client_secret }` → 取得 token → 存 httpOnly cookie |
-| `GET /api/auth/me` | 讀 cookie → `Authorization: Bearer {token}` 呼叫 `SSO_URL/api/auth/me` → 回傳結果 |
-| `GET /api/auth/logout` | 讀 cookie → POST `SSO_URL/api/auth/logout` (Bearer) → 刪 cookie → redirect |
-| `POST /api/auth/back-channel-logout` | 接收 `{ user_id, timestamp, signature }` → 驗證 HMAC 簽章 → 回傳 `{ success: true }` |
+| `GET /callback?code=xxx` | POST `SSO/exchange` `{ code, client_id, client_secret }` → 存 token cookie |
+| `GET /me` | 讀 cookie → `Bearer {token}` 呼叫 `SSO/me` → 回傳結果 |
+| `GET /logout` | 讀 cookie → POST `SSO/logout` (Bearer) → 刪 cookie → redirect |
+| `POST /back-channel-logout` | 驗證 HMAC 簽章 `{ user_id, timestamp, signature }` → 回 `{ success: true }` |
 
-注意事項：
-- 所有 server-to-server fetch 加上 `cache: "no-store"` + timeout
-- `/api/auth/me` 區分 `no_token`（可自動導向 SSO）和 `session_expired`（顯示按鈕）
-- 登出用 server-to-server POST（帶 Bearer token），不是 browser redirect
-- exchange 必須帶 `client_id` + `client_secret`（server-to-server，不可暴露在前端）
+重點：
+- 所有 server-to-server fetch 加 `cache: "no-store"` + timeout
+- `/me` 區分 `no_token`（自動導向 SSO）和 `session_expired`（顯示按鈕）
+- exchange 必須帶 `client_id` + `client_secret`（保密，不可暴露在前端）
+- back-channel 用 `HMAC-SHA256(app_secret, user_id:timestamp)` 驗證簽章
 
 ---
 
@@ -340,9 +314,10 @@ SSO 整合的核心是 4 個 HTTP 端點，任何後端框架都能實作：
 
 | 問題 | 原因 |
 |------|------|
-| `Invalid client_id` | `SSO_APP_ID` 錯誤或該 App 未啟用 |
+| `Invalid client_id` | `SSO_APP_ID` 錯誤，或該 App 未啟用 |
 | `Invalid client credentials` | `SSO_APP_SECRET` 錯誤 |
-| `redirect_uri origin is not registered` | `APP_URL` 的 origin 不在白名單的 `redirect_uris` 中 |
-| `Too many authentication attempts` | rate limit 超限，檢查是否有無限迴圈 |
-| 登出後其他 App 仍可用 | 正常，其他 App 下次呼叫 `/me` 時會收到 401 並清除 cookie |
+| `redirect_uri is not registered` | `APP_URL` origin 不在白名單的 `redirect_uris` 中 |
+| `Too many authentication attempts` | rate limit 超限，/me 和 /logout 為 100 次/15min |
+| 登出後其他 App 仍可用 | 正常，其他 App 下次 `/me` 時收到 401 並清除 cookie |
 | `exchange_failed` | auth code 過期（60 秒）或已被使用，或 client credentials 錯誤 |
+| `Invalid signature`（back-channel） | `SSO_APP_SECRET` 與 SSO 端不一致，或 timestamp 超過 30 秒 |
