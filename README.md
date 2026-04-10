@@ -13,6 +13,7 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 ┌──────────────────────┐            ┌──────────────────┐         ┌────────────┐
 │  /api/auth/me        │  Bearer    │  驗證 JWT        │         │            │
 │  /api/auth/callback  │ ──(code)─> │  code exchange   │         │            │
+│   + client_id/secret │            │  驗證 credentials│         │            │
 │  /api/auth/logout    │ ──(token)─>│  刪 session      │         │            │
 │                      │            │  back-channel    │         │            │
 │                      │  <──────── │  authorize       │ ──────> │  OAuth 2.0 │
@@ -22,8 +23,9 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 
 ### 核心原則
 
-- Client App 使用標準 **OAuth2 Authorization Code** 流程，不依賴共用 domain cookie
-- Client App 透過 **code exchange** 取得 JWT token，存為自己的本地 cookie
+- 每個 Client App 由 SSO 中央發放 **`app_id`** + **`app_secret`**（OAuth2 Client Credentials）
+- `app_id` + `app_secret` 跨環境（dev/test/prod）共用，只需改 `APP_URL`
+- 一個 App 可註冊多個 **`redirect_uris`**（dev/test/prod 各自的 origin）
 - SSO 是唯一的 session 管理平台，Client App 每次都向 SSO `/api/auth/me` 即時驗證
 
 ---
@@ -32,24 +34,24 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 
 ### 登入
 
-1. Client App `/api/auth/me` → 無 token → `401 no_token` → 自動導向 SSO `/sso/authorize`
-2. SSO 檢查中央 session → 無 → 導向 Microsoft 登入
-3. Microsoft 登入成功 → SSO 建立 Redis session → 產生一次性 auth code（60 秒 TTL）
-4. redirect 回 Client App `/api/auth/callback?code=xxx`
-5. Client App POST `/sso/exchange` 用 code 換 JWT token → 存本地 cookie → 進 Dashboard
+1. Client App `/api/auth/me` → 無 token → `401 no_token` → 自動導向 SSO `/sso/authorize?client_id=...`
+2. SSO 用 `client_id` 查白名單 → 驗證 `redirect_uri` origin 在 `redirect_uris` 中
+3. SSO 檢查中央 session → 無 → 導向 Microsoft 登入
+4. Microsoft 登入成功 → SSO 建立 Redis session → 產生一次性 auth code（60 秒 TTL）
+5. redirect 回 Client App `/api/auth/callback?code=xxx`
+6. Client App POST `/sso/exchange` `{ code, client_id, client_secret }` → 換 JWT token → 存本地 cookie
 
 ### 跨 App 免登入
 
 1. 已在 App-A 登入 → 訪問 App-B → App-B `/api/auth/me` → `401 no_token`
 2. 自動導向 SSO `/sso/authorize` → SSO 已有中央 session → 靜默產生 code → redirect 回 App-B
-3. App-B 用 code 換 token → 自動進 Dashboard（不跳 Microsoft 登入頁）
+3. App-B 用 code + credentials 換 token → 自動進 Dashboard（不跳 Microsoft 登入頁）
 
 ### 登出
 
 1. Client App 讀取本地 token → POST SSO `/api/auth/logout`（Bearer token）
-2. SSO 刪除 Redis session `sso:session:{userId}`
-3. SSO back-channel POST 通知所有白名單 Client App `/api/auth/back-channel-logout`
-4. Client App 清除本地 cookie → redirect `/?logged_out=1`
+2. SSO 刪除 Redis session → back-channel 通知所有 Client App
+3. Client App 清除本地 cookie → redirect `/?logged_out=1`
 
 ### Session 過期
 
@@ -62,8 +64,8 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 
 | Method | Path | 用途 | Rate Limit |
 |--------|------|------|-----------|
-| GET | `/api/auth/sso/authorize` | Client App 導向 SSO 認證 | 30/15min |
-| POST | `/api/auth/sso/exchange` | Client App 用 code 換 token | 20/1min |
+| GET | `/api/auth/sso/authorize` | `?client_id=&redirect_uri=` 導向 SSO 認證 | 30/15min |
+| POST | `/api/auth/sso/exchange` | `{ code, client_id, client_secret }` 換 token | 20/1min |
 | GET | `/api/auth/sso/logout` | SSO Frontend 全域登出 | 30/15min |
 | GET | `/api/auth/{authPath}/login` | 導向 Microsoft 登入 | 30/15min |
 | GET | `/api/auth/{authPath}/redirect` | Microsoft OAuth 回調 | 30/15min |
@@ -80,14 +82,14 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 ```env
 PORT=35890
 NODE_ENV=production
-FRONTEND_URL=https://df-sso-management.apps.zerozero.tw
+FRONTEND_URL=https://df-sso-management-test.apps.zerozero.tw
 SESSION_SECRET=<32+ char>
 JWT_SECRET=<32+ char>
 JWT_EXPIRES_IN=24h
 AZURE_CLIENT_ID=<uuid>
 AZURE_CLIENT_SECRET=<secret>
 AZURE_TENANT_ID=<uuid>
-AZURE_REDIRECT_URI=https://df-sso-login.apps.zerozero.tw/api/auth/{authPath}/redirect
+AZURE_REDIRECT_URI=https://df-sso-login-test.apps.zerozero.tw/api/auth/{authPath}/redirect
 PG_HOST=postgres
 PG_PORT=5432
 PG_DATABASE=SSO-v1
@@ -97,18 +99,18 @@ REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_DB=15
 COOKIE_DOMAIN=.apps.zerozero.tw
-ROPC_REDIRECT_URL=https://df-sso-management.apps.zerozero.tw/dashboard
+ROPC_REDIRECT_URL=https://df-sso-management-test.apps.zerozero.tw/dashboard
 ```
 
 ### 白名單 (sso_allowed_list)
 
-| name | domain | is_active |
-|------|--------|-----------|
-| SSO Management | `https://df-sso-management.apps.zerozero.tw` | true |
-| App A | `https://df-sso-mock-test-app-a.apps.zerozero.tw` | true |
-| App B | `https://df-sso-mock-test-app-b.apps.zerozero.tw` | true |
+建立 App 時 SSO 自動產生 `app_id` + `app_secret`，管理員設定 `redirect_uris`：
 
-> `name` = Client App 的 `NEXT_PUBLIC_APP_NAME`，`domain` = Client App 的 `APP_URL` origin。
+| name | domain | redirect_uris | app_id | app_secret |
+|------|--------|---------------|--------|------------|
+| SSO Management | `https://df-sso-management-test...` | `[prod, test]` | (auto) | (auto) |
+| App A | `https://df-sso-mock-test-app-a...` | `[http://localhost:3100, https://df-sso-mock-test-app-a...]` | (auto) | (auto) |
+| App B | `https://df-sso-mock-test-app-b...` | `[http://localhost:3200, https://df-sso-mock-test-app-b...]` | (auto) | (auto) |
 
 ### 驗證步驟
 

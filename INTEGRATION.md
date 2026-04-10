@@ -6,19 +6,23 @@
 
 ## 前置作業
 
-### 1. 向 SSO 管理員申請白名單
+### 1. 向 SSO 管理員申請 App
 
-到 SSO Dashboard（`https://df-sso-management.apps.zerozero.tw`）的白名單管理新增你的專案：
+到 SSO Dashboard 的白名單管理新增你的專案，SSO 會自動產生 `app_id` + `app_secret`：
 
 | 欄位 | 說明 | 範例 |
 |------|------|------|
-| **名稱** | App 識別名稱，程式裡會用到 | `倉儲系統` |
-| **網域** | 你的專案 URL（含 `https://`） | `https://warehouse.apps.zerozero.tw` |
-| **說明** | 簡述系統用途 | `大豐倉儲管理系統` |
+| **名稱** | App 顯示名稱 | `倉儲系統` |
+| **網域** | 主要 domain（含 `https://`） | `https://warehouse.apps.zerozero.tw` |
+| **redirect_uris** | 所有環境的 origin（dev/test/prod） | `http://localhost:3100`, `https://warehouse.apps.zerozero.tw` |
+
+建立後你會取得：
+- **`app_id`** — UUID，公開的 client identifier
+- **`app_secret`** — 64 字元隨機字串，保密，用於 server-to-server exchange
 
 ### 2. 確認 SSO Backend URL
 
-- Production：`https://df-sso-login.apps.zerozero.tw`
+- Test：`https://df-sso-login-test.apps.zerozero.tw`
 - 本機開發：`http://localhost:3001`
 
 ---
@@ -27,16 +31,19 @@
 
 ```env
 # Server-side（runtime）
-SSO_URL=https://df-sso-login.apps.zerozero.tw
+SSO_URL=https://df-sso-login-test.apps.zerozero.tw
+SSO_APP_ID=<從白名單取得的 app_id>
+SSO_APP_SECRET=<從白名單取得的 app_secret>
 APP_URL=https://warehouse.apps.zerozero.tw
 
 # Client-side（build time，Next.js 用）
-NEXT_PUBLIC_SSO_URL=https://df-sso-login.apps.zerozero.tw
+NEXT_PUBLIC_SSO_URL=https://df-sso-login-test.apps.zerozero.tw
+NEXT_PUBLIC_SSO_APP_ID=<同 SSO_APP_ID>
 NEXT_PUBLIC_APP_URL=https://warehouse.apps.zerozero.tw
-NEXT_PUBLIC_APP_NAME=倉儲系統
 ```
 
-> **`NEXT_PUBLIC_APP_NAME` 必須和白名單的「名稱」完全一致**（含大小寫、空格）。
+> `app_id` + `app_secret` 跨環境共用（dev/test/prod 同一組），只需改 `APP_URL`。
+> `APP_URL` 的 origin 必須在白名單的 `redirect_uris` 中。
 
 ---
 
@@ -52,6 +59,9 @@ import { cookies } from "next/headers";
 const TOKEN_COOKIE = "token";
 const SSO_URL = process.env.SSO_URL || "http://localhost:3001";
 const SSO_TIMEOUT = 8000;
+
+export const SSO_APP_ID = process.env.SSO_APP_ID || "";
+export const SSO_APP_SECRET = process.env.SSO_APP_SECRET || "";
 
 export async function getToken(): Promise<string | null> {
   const cookieStore = await cookies();
@@ -69,11 +79,11 @@ export async function fetchSSO(path: string, init?: RequestInit): Promise<Respon
 
 ### `app/api/auth/callback/route.ts`
 
-用 SSO 回傳的 auth code 換取 JWT token，存為本地 cookie。
+用 auth code + client credentials 向 SSO 換取 JWT token。
 
 ```typescript
 import { NextRequest, NextResponse } from "next/server";
-import { fetchSSO } from "../../../../lib/sso";
+import { fetchSSO, SSO_APP_ID, SSO_APP_SECRET } from "../../../../lib/sso";
 
 const APP_URL = process.env.APP_URL!;
 
@@ -85,7 +95,7 @@ export async function GET(request: NextRequest) {
     const res = await fetchSSO("/api/auth/sso/exchange", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, client_id: SSO_APP_ID, client_secret: SSO_APP_SECRET }),
     });
     if (!res.ok) return NextResponse.redirect(new URL("/?error=exchange_failed", APP_URL));
 
@@ -187,7 +197,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 const SSO_URL = process.env.NEXT_PUBLIC_SSO_URL!;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL!;
-const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME!;
+const SSO_APP_ID = process.env.NEXT_PUBLIC_SSO_APP_ID!;
 
 export default function LoginPage() {
   const router = useRouter();
@@ -196,7 +206,7 @@ export default function LoginPage() {
   const loggedOut = searchParams.get("logged_out");
   const [checking, setChecking] = useState(true);
 
-  const ssoUrl = `${SSO_URL}/api/auth/sso/authorize?app=${encodeURIComponent(APP_NAME)}&redirect_uri=${encodeURIComponent(`${APP_URL}/api/auth/callback`)}`;
+  const ssoUrl = `${SSO_URL}/api/auth/sso/authorize?client_id=${encodeURIComponent(SSO_APP_ID)}&redirect_uri=${encodeURIComponent(`${APP_URL}/api/auth/callback`)}`;
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -283,7 +293,7 @@ SSO 整合的核心是 4 個 HTTP 端點，任何後端框架都能實作：
 
 | 端點 | 做什麼 |
 |------|--------|
-| `GET /api/auth/callback?code=xxx` | POST `SSO_URL/api/auth/sso/exchange` { code } → 取得 token → 存 httpOnly cookie |
+| `GET /api/auth/callback?code=xxx` | POST `SSO_URL/api/auth/sso/exchange` `{ code, client_id, client_secret }` → 取得 token → 存 httpOnly cookie |
 | `GET /api/auth/me` | 讀 cookie → `Authorization: Bearer {token}` 呼叫 `SSO_URL/api/auth/me` → 回傳結果 |
 | `GET /api/auth/logout` | 讀 cookie → POST `SSO_URL/api/auth/logout` (Bearer) → 刪 cookie → redirect |
 | `POST /api/auth/back-channel-logout` | 接收 `{ user_id }` → 回傳 `{ success: true }` |
@@ -292,6 +302,7 @@ SSO 整合的核心是 4 個 HTTP 端點，任何後端框架都能實作：
 - 所有 server-to-server fetch 加上 `cache: "no-store"` + timeout
 - `/api/auth/me` 區分 `no_token`（可自動導向 SSO）和 `session_expired`（顯示按鈕）
 - 登出用 server-to-server POST（帶 Bearer token），不是 browser redirect
+- exchange 必須帶 `client_id` + `client_secret`（server-to-server，不可暴露在前端）
 
 ---
 
@@ -299,8 +310,9 @@ SSO 整合的核心是 4 個 HTTP 端點，任何後端框架都能實作：
 
 | 問題 | 原因 |
 |------|------|
-| `App "xxx" not found` | `NEXT_PUBLIC_APP_NAME` 和白名單「名稱」不一致 |
-| `redirect_uri origin does not match` | `APP_URL` 和白名單「網域」不一致 |
+| `Invalid client_id` | `SSO_APP_ID` 錯誤或該 App 未啟用 |
+| `Invalid client credentials` | `SSO_APP_SECRET` 錯誤 |
+| `redirect_uri origin is not registered` | `APP_URL` 的 origin 不在白名單的 `redirect_uris` 中 |
 | `Too many authentication attempts` | rate limit 超限，檢查是否有無限迴圈 |
 | 登出後其他 App 仍可用 | 正常，其他 App 下次呼叫 `/me` 時會收到 401 並清除 cookie |
-| `exchange_failed` | auth code 過期（60 秒）或已被使用 |
+| `exchange_failed` | auth code 過期（60 秒）或已被使用，或 client credentials 錯誤 |
