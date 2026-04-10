@@ -271,17 +271,51 @@ router.get('/me', async (req, res) => {
 
 /**
  * POST /api/auth/logout
- * 登出：清除 Redis Session + Cookie
+ * 登出：清除 Redis Session + Cookie + Back-channel 通知其他 Client App
+ * 支援兩種方式：
+ *   1. Cookie: token（SSO Frontend 使用）
+ *   2. Authorization: Bearer <token>（Client App server-to-server 使用）
  */
 router.post('/logout', async (req, res) => {
-  const token = req.cookies.token;
+  let token = req.cookies.token;
+  if (!token) {
+    const auth = req.headers.authorization;
+    if (auth && auth.startsWith('Bearer ')) {
+      token = auth.slice(7);
+    }
+  }
+
+  let userId = null;
 
   if (token) {
     try {
       const decoded = jwt.verify(token, config.jwtSecret);
+      userId = decoded.userId;
       await redis.del(`${SESSION_PREFIX}${decoded.userId}`);
     } catch (error) {
       // token 無效也繼續清除 cookie
+    }
+  }
+
+  // Back-channel Logout：通知所有啟用的 client app
+  if (userId) {
+    try {
+      const allowedDomains = await allowedListService.findAll();
+      const backChannelPromises = allowedDomains
+        .filter((d) => d.domain !== config.frontendUrl)
+        .map((d) =>
+          fetch(`${d.domain}/api/auth/back-channel-logout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId }),
+            signal: AbortSignal.timeout(5000),
+          }).catch((err) => {
+            console.warn(`Back-channel logout to ${d.domain} failed:`, err.message);
+          })
+        );
+      await Promise.allSettled(backChannelPromises);
+    } catch (err) {
+      console.error('Back-channel logout error:', err.message);
     }
   }
 

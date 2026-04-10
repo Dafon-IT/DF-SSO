@@ -57,13 +57,24 @@ const globalLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
-// Auth 端點嚴格速率限制（防暴力攻擊）
+// Auth 端點嚴格速率限制（防暴力攻擊，僅限登入/redirect 流程）
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 分鐘
   max: 30,                   // 每 IP 最多 30 次
   standardHeaders: true,
   legacyHeaders: false,
+  // /me 和 POST /logout 是 Client App 高頻 server-to-server 呼叫，不套用嚴格限制
+  skip: (req) => req.path === '/me' || (req.method === 'POST' && req.path === '/logout'),
   message: { error: 'Too many authentication attempts, please try again later' },
+});
+
+// /me 與 /logout 較寬鬆的速率限制（Client App 每次頁面載入都會呼叫）
+const sessionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 分鐘
+  max: 100,                  // 每 IP 最多 100 次
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' },
 });
 
 // SSO exchange 端點速率限制
@@ -123,6 +134,7 @@ app.use(session({
   cookie: {
     secure: config.nodeEnv === 'production',
     httpOnly: true,
+    sameSite: 'lax',
     maxAge: 10 * 60 * 1000, // 10 分鐘（僅用於 OAuth state）
   },
 }));
@@ -131,6 +143,8 @@ app.use(session({
 // Routes（搭配 rate limiting）
 // ============================================
 
+app.use('/api/auth/me', sessionLimiter);
+app.use('/api/auth/logout', sessionLimiter);
 app.use('/api/auth/sso/exchange', exchangeLimiter);
 app.use('/api/auth/sso', authLimiter, ssoRoutes);
 app.use('/api/auth', authLimiter, authRoutes);
