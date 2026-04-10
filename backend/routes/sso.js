@@ -166,7 +166,7 @@ router.get('/logout', async (req, res) => {
     }
   }
 
-  res.clearCookie('token');
+  res.clearCookie('token', { ...(config.cookieDomain && { domain: config.cookieDomain }), path: '/' });
 
   // 驗證 redirect 是否在白名單中，防止開放重導向攻擊
   let safeRedirect = config.frontendUrl;

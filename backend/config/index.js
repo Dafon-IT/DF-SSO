@@ -35,6 +35,9 @@ const config = {
     })(),
   },
 
+  // Cookie domain（設定後 token cookie 會在所有子網域共用，例如 .apps.zerozero.tw）
+  cookieDomain: process.env.COOKIE_DOMAIN || undefined,
+
   // Login redirect
   loginRedirectUrl: process.env.ROPC_REDIRECT_URL || '/',
 

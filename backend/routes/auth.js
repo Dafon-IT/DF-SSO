@@ -199,6 +199,7 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
     secure: config.nodeEnv === 'production',
     sameSite: 'lax',
     maxAge: SESSION_TTL * 1000,
+    ...(config.cookieDomain && { domain: config.cookieDomain }),
   });
 
   // 檢查是否有 SSO 重導目標（來自客戶端 App 的 authorize 流程）
@@ -256,14 +257,14 @@ router.get('/me', async (req, res) => {
     // 驗證 Redis Session
     const sessionStr = await redis.get(`${SESSION_PREFIX}${decoded.userId}`);
     if (!sessionStr) {
-      res.clearCookie('token');
+      res.clearCookie('token', { ...(config.cookieDomain && { domain: config.cookieDomain }), path: '/' });
       return res.status(401).json({ error: 'Session expired' });
     }
 
     const session = JSON.parse(sessionStr);
     res.json({ user: session });
   } catch (error) {
-    res.clearCookie('token');
+    res.clearCookie('token', { ...(config.cookieDomain && { domain: config.cookieDomain }), path: '/' });
     res.status(401).json({ error: 'Invalid token' });
   }
 });
@@ -284,7 +285,7 @@ router.post('/logout', async (req, res) => {
     }
   }
 
-  res.clearCookie('token');
+  res.clearCookie('token', { ...(config.cookieDomain && { domain: config.cookieDomain }), path: '/' });
   res.json({ message: 'Logged out' });
 });
 
