@@ -26,6 +26,7 @@ const swaggerSpec = {
     { name: 'Auth', description: '登入 / 登出 / Session 驗證' },
     { name: 'SSO', description: 'OAuth2 Authorization Code Flow（Client App 串接用）' },
     { name: 'Admin - 白名單', description: '白名單 CRUD（需管理員權限）' },
+    { name: 'Admin - 管理員', description: '管理員 CRUD（需管理員權限）' },
     { name: 'Admin - 登入紀錄', description: '登入紀錄查詢（需管理員權限）' },
     { name: 'Health', description: '健康檢查' },
   ],

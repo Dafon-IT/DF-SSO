@@ -143,6 +143,26 @@ router.put('/:uid', async (req, res) => {
 });
 
 /**
+ * GET /api/allowed-list/:uid/credentials
+ * 取得完整的 app_id + app_secret（僅限管理員，用於設定 Client App 環境變數）
+ */
+router.get('/:uid/credentials', async (req, res) => {
+  try {
+    const { rows } = await require('../config/database').query(
+      'SELECT app_id, app_secret FROM sso_allowed_list WHERE uid = $1 AND is_deleted = FALSE',
+      [req.params.uid]
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ success: false, error: 'Not found' });
+    }
+    res.json({ success: true, data: rows[0] });
+  } catch (error) {
+    console.error('AllowedList credentials error:', error.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
  * POST /api/allowed-list/:uid/regenerate-secret
  * 重新產生 app_secret
  */

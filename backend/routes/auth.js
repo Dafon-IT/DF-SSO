@@ -178,6 +178,8 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
     if (!isAdmin) {
       return res.redirect(`${config.frontendUrl}?error=not_admin`);
     }
+    // 新進管理員首次登入：自動填入 azure_oid、name
+    await adminManager.activateIfNewer(claims.oid, email, claims.name);
   }
 
   // Session fixation 防護：登入成功後重新產生 session ID

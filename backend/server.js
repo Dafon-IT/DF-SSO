@@ -14,6 +14,7 @@ const authRoutes = require('./routes/auth');
 const ssoRoutes = require('./routes/sso');
 const allowedListRoutes = require('./routes/allowedList');
 const loginLogRoutes = require('./routes/loginLog');
+const adminManagerRoutes = require('./routes/adminManager');
 const allowedListService = require('./services/allowedList');
 const adminAuth = require('./middleware/adminAuth');
 
@@ -164,6 +165,7 @@ app.use('/api/auth/sso', authLimiter, ssoRoutes);
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/allowed-list', adminAuth, allowedListRoutes);
 app.use('/api/login-log', adminAuth, loginLogRoutes);
+app.use('/api/admin-manager', adminAuth, adminManagerRoutes);
 
 // Health check
 app.get('/api/health', async (req, res) => {
