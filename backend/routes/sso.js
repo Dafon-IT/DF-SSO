@@ -67,6 +67,15 @@ router.get('/authorize', async (req, res) => {
           AUTH_CODE_TTL
         );
 
+        // 刷新 token cookie（確保帶上最新的 domain 設定）
+        res.cookie('token', token, {
+          httpOnly: true,
+          secure: config.nodeEnv === 'production',
+          sameSite: 'lax',
+          maxAge: 24 * 60 * 60 * 1000,
+          ...(config.cookieDomain && { domain: config.cookieDomain }),
+        });
+
         // 帶 code 重導回 client app
         redirectUrl.searchParams.set('code', code);
         return res.redirect(redirectUrl.toString());
