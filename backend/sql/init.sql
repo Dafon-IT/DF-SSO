@@ -32,7 +32,7 @@ $$ LANGUAGE plpgsql VOLATILE;
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
-  NEW.updated_at = NOW() AT TIME ZONE 'Asia/Taipei';
+  NEW.updated_at = NOW();
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -65,8 +65,8 @@ CREATE TABLE IF NOT EXISTS sso_login_log (
   ip_address  VARCHAR(45),
   user_agent  TEXT,
 
-  created_at  TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Taipei'),
-  updated_at  TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Taipei')
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_sso_login_log_email ON sso_login_log (email);
@@ -93,8 +93,8 @@ CREATE TABLE IF NOT EXISTS sso_allowed_list (
   is_active   BOOLEAN NOT NULL DEFAULT TRUE,
   is_deleted  BOOLEAN NOT NULL DEFAULT FALSE,
 
-  created_at  TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Taipei'),
-  updated_at  TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Taipei')
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sso_allowed_list_domain ON sso_allowed_list (domain) WHERE is_deleted = FALSE;
