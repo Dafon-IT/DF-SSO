@@ -38,8 +38,9 @@ router.get('/authorize', async (req, res) => {
     redirectUrl = new URL(redirect_uri);
     const uris = app.redirect_uris || [];
     if (!uris.includes(redirectUrl.origin)) {
+      console.warn(`Blocked redirect_uri origin: ${redirectUrl.origin} for app: ${client_id}`);
       return res.status(403).json({
-        error: `redirect_uri origin "${redirectUrl.origin}" is not registered for this app`,
+        error: 'redirect_uri is not registered for this app',
       });
     }
   } catch {
@@ -116,7 +117,12 @@ router.post('/exchange', async (req, res) => {
   }
 
   const app = await allowedListService.findByAppId(client_id);
-  if (!app || app.app_secret !== client_secret) {
+  if (
+    !app || !client_secret ||
+    typeof client_secret !== 'string' ||
+    client_secret.length !== app.app_secret.length ||
+    !crypto.timingSafeEqual(Buffer.from(app.app_secret), Buffer.from(client_secret))
+  ) {
     return res.status(401).json({ error: 'Invalid client credentials' });
   }
 
@@ -175,22 +181,27 @@ router.get('/logout', async (req, res) => {
     }
   }
 
-  // Back-channel Logout：通知所有已註冊的 client app
+  // Back-channel Logout：通知所有已註冊的 client app（帶 HMAC 簽章防偽造）
   if (userId) {
     try {
-      const origins = await allowedListService.getAllOrigins();
-      const backChannelPromises = origins
-        .filter((origin) => origin !== config.frontendUrl)
-        .map((origin) =>
-          fetch(`${origin}/api/auth/back-channel-logout`, {
+      const apps = await allowedListService.getAllAppsForBackChannel();
+      const timestamp = Date.now();
+      const backChannelPromises = apps
+        .filter(({ origin }) => origin !== config.frontendUrl)
+        .map(({ origin, appSecret }) => {
+          const signature = crypto
+            .createHmac('sha256', appSecret)
+            .update(`${userId}:${timestamp}`)
+            .digest('hex');
+          return fetch(`${origin}/api/auth/back-channel-logout`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId }),
+            body: JSON.stringify({ user_id: userId, timestamp, signature }),
             signal: AbortSignal.timeout(5000),
           }).catch((err) => {
             console.warn(`Back-channel logout to ${origin} failed:`, err.message);
-          })
-        );
+          });
+        });
       await Promise.allSettled(backChannelPromises);
     } catch (err) {
       console.error('Back-channel logout error:', err.message);
@@ -199,19 +210,26 @@ router.get('/logout', async (req, res) => {
 
   res.clearCookie('token', { ...(config.cookieDomain && { domain: config.cookieDomain }), path: '/' });
 
-  // 驗證 redirect 是否在已註冊的 redirect_uris 中
+  // 驗證 redirect 是否在已註冊的 redirect_uris 中（僅允許已知 origin，禁止任意 path）
   let safeRedirect = config.frontendUrl;
   if (redirect) {
     try {
-      const redirectOrigin = new URL(redirect).origin;
-      const origins = await allowedListService.getAllOrigins();
-      if (origins.includes(redirectOrigin) || redirectOrigin === config.frontendUrl) {
-        safeRedirect = redirect;
+      const parsed = new URL(redirect);
+      // 只允許 http/https 協定，防止 javascript: 等協定注入
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        console.warn(`Blocked redirect with disallowed protocol: ${parsed.protocol}`);
       } else {
-        console.warn(`Blocked redirect to unauthorized origin: ${redirectOrigin}`);
+        const redirectOrigin = parsed.origin;
+        const origins = await allowedListService.getAllOrigins();
+        if (origins.includes(redirectOrigin) || redirectOrigin === config.frontendUrl) {
+          // 只保留 origin（剝除攻擊者可能注入的 path/query/fragment）
+          safeRedirect = redirectOrigin;
+        } else {
+          console.warn(`Blocked redirect to unauthorized origin: ${redirectOrigin}`);
+        }
       }
     } catch {
-      console.warn(`Invalid redirect URL: ${redirect}`);
+      console.warn('Invalid redirect URL in logout request');
     }
   }
 

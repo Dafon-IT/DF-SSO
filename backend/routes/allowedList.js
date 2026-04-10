@@ -57,6 +57,9 @@ router.post('/', async (req, res) => {
 
     // 驗證 redirect_uris（若有提供）
     if (redirect_uris && Array.isArray(redirect_uris)) {
+      if (redirect_uris.length > 10) {
+        return res.status(400).json({ success: false, error: 'redirect_uris 最多 10 筆' });
+      }
       for (const uri of redirect_uris) {
         try {
           const u = new URL(uri);
@@ -107,6 +110,9 @@ router.put('/:uid', async (req, res) => {
 
     // 驗證 redirect_uris（若有提供）
     if (redirect_uris !== undefined && Array.isArray(redirect_uris)) {
+      if (redirect_uris.length > 10) {
+        return res.status(400).json({ success: false, error: 'redirect_uris 最多 10 筆' });
+      }
       for (const uri of redirect_uris) {
         try {
           const u = new URL(uri);

@@ -2,6 +2,15 @@ const crypto = require('crypto');
 const db = require('../config/database');
 
 /**
+ * 從 row 中移除 app_secret，僅保留末 4 碼供辨識
+ */
+function stripSecret(row) {
+  if (!row) return null;
+  const { app_secret, ...safe } = row;
+  return { ...safe, app_secret_last4: app_secret ? `****${app_secret.slice(-4)}` : null };
+}
+
+/**
  * 取得所有未刪除的白名單
  */
 async function findAll({ includeInactive = false } = {}) {
@@ -11,7 +20,7 @@ async function findAll({ includeInactive = false } = {}) {
   const { rows } = await db.query(
     `SELECT * FROM sso_allowed_list ${condition} ORDER BY created_at DESC`
   );
-  return rows;
+  return rows.map(stripSecret);
 }
 
 /**
@@ -22,7 +31,7 @@ async function findByUid(uid) {
     'SELECT * FROM sso_allowed_list WHERE uid = $1 AND is_deleted = FALSE',
     [uid]
   );
-  return rows[0] || null;
+  return stripSecret(rows[0]);
 }
 
 /**
@@ -118,7 +127,7 @@ async function update(uid, { domain, name, description, isActive, redirectUris }
     `UPDATE sso_allowed_list SET ${fields.join(', ')} WHERE uid = $${paramIndex} AND is_deleted = FALSE RETURNING *`,
     params
   );
-  return rows[0] || null;
+  return stripSecret(rows[0]);
 }
 
 /**
@@ -141,7 +150,7 @@ async function remove(uid) {
     `UPDATE sso_allowed_list SET is_deleted = TRUE, is_active = FALSE WHERE uid = $1 AND is_deleted = FALSE RETURNING *`,
     [uid]
   );
-  return rows[0] || null;
+  return stripSecret(rows[0]);
 }
 
 /**
@@ -173,8 +182,30 @@ async function getAllOrigins() {
   return [...origins];
 }
 
+/**
+ * 取得所有已註冊 App 的 origin + secret（用於 back-channel HMAC 簽章）
+ */
+async function getAllAppsForBackChannel() {
+  const { rows } = await db.query(
+    'SELECT app_secret, redirect_uris FROM sso_allowed_list WHERE is_active = TRUE AND is_deleted = FALSE'
+  );
+  const result = [];
+  const seen = new Set();
+  for (const row of rows) {
+    if (row.redirect_uris) {
+      for (const uri of row.redirect_uris) {
+        if (!seen.has(uri)) {
+          seen.add(uri);
+          result.push({ origin: uri, appSecret: row.app_secret });
+        }
+      }
+    }
+  }
+  return result;
+}
+
 module.exports = {
   findAll, findByUid, findByAppId, findByName,
   create, update, regenerateSecret, remove,
-  isDomainAllowed, getAllOrigins,
+  isDomainAllowed, getAllOrigins, getAllAppsForBackChannel,
 };

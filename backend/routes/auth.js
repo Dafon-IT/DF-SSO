@@ -63,10 +63,14 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
 
   if (oauthError) {
     console.error('Microsoft OAuth Error:', oauthError, error_description);
-    return res.redirect(`${config.frontendUrl}?error=${encodeURIComponent(oauthError)}`);
+    return res.redirect(`${config.frontendUrl}?error=authentication_failed`);
   }
 
-  if (!state || state !== req.session.oauthState) {
+  if (
+    !state || !req.session.oauthState ||
+    state.length !== req.session.oauthState.length ||
+    !crypto.timingSafeEqual(Buffer.from(state), Buffer.from(req.session.oauthState))
+  ) {
     console.error('Invalid state parameter');
     return res.redirect(`${config.frontendUrl}?error=invalid_state`);
   }
@@ -124,7 +128,7 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
         preferredUsername: claims.preferred_username,
         erpData: null,
         status: 'failed',
-        errorMessage: `Domain not allowed: ${config.frontendUrl}`,
+        errorMessage: 'Domain not in allowed list',
         ipAddress,
         userAgent,
       }).catch((e) => console.error('Failed to log login:', e.message));
@@ -175,6 +179,11 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
       return res.redirect(`${config.frontendUrl}?error=not_admin`);
     }
   }
+
+  // Session fixation 防護：登入成功後重新產生 session ID
+  await new Promise((resolve, reject) => {
+    req.session.regenerate((err) => (err ? reject(err) : resolve()));
+  });
 
   // Step 7: 發放 JWT + 寫入 Redis Session
   const user = {
@@ -313,22 +322,27 @@ router.post('/logout', async (req, res) => {
     }
   }
 
-  // Back-channel Logout：通知所有已註冊的 client app
+  // Back-channel Logout：通知所有已註冊的 client app（帶 HMAC 簽章防偽造）
   if (userId) {
     try {
-      const origins = await allowedListService.getAllOrigins();
-      const backChannelPromises = origins
-        .filter((origin) => origin !== config.frontendUrl)
-        .map((origin) =>
-          fetch(`${origin}/api/auth/back-channel-logout`, {
+      const apps = await allowedListService.getAllAppsForBackChannel();
+      const timestamp = Date.now();
+      const backChannelPromises = apps
+        .filter(({ origin }) => origin !== config.frontendUrl)
+        .map(({ origin, appSecret }) => {
+          const signature = crypto
+            .createHmac('sha256', appSecret)
+            .update(`${userId}:${timestamp}`)
+            .digest('hex');
+          return fetch(`${origin}/api/auth/back-channel-logout`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId }),
+            body: JSON.stringify({ user_id: userId, timestamp, signature }),
             signal: AbortSignal.timeout(5000),
           }).catch((err) => {
             console.warn(`Back-channel logout to ${origin} failed:`, err.message);
-          })
-        );
+          });
+        });
       await Promise.allSettled(backChannelPromises);
     } catch (err) {
       console.error('Back-channel logout error:', err.message);

@@ -172,16 +172,46 @@ export async function GET() {
 ### `app/api/auth/back-channel-logout/route.ts`
 
 接收 SSO 的登出通知（當其他 App 登出時觸發）。
+SSO 會在 request body 附帶 HMAC-SHA256 簽章，**務必驗證**以防偽造登出攻擊。
 
 ```typescript
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
+
+const SSO_APP_SECRET = process.env.SSO_APP_SECRET || "";
+const MAX_TIMESTAMP_DRIFT = 30_000; // 30 秒
 
 export async function POST(request: NextRequest) {
-  let body;
+  let body: { user_id?: string; timestamp?: number; signature?: string };
   try { body = await request.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  console.log(`[Back-channel Logout] User ${body.user_id} logged out from SSO`);
+
+  const { user_id, timestamp, signature } = body;
+  if (!user_id || !timestamp || !signature) {
+    return NextResponse.json({ error: "Missing fields" }, { status: 400 });
+  }
+
+  // 驗證時間戳（防 replay）
+  if (Math.abs(Date.now() - timestamp) > MAX_TIMESTAMP_DRIFT) {
+    return NextResponse.json({ error: "Timestamp expired" }, { status: 401 });
+  }
+
+  // 驗證 HMAC 簽章
+  const expected = crypto
+    .createHmac("sha256", SSO_APP_SECRET)
+    .update(`${user_id}:${timestamp}`)
+    .digest("hex");
+
+  if (
+    signature.length !== expected.length ||
+    !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+  ) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  console.log(`[Back-channel Logout] User ${user_id} logged out from SSO`);
+  // TODO: 在此清除該用戶的本地 session / cache
   return NextResponse.json({ success: true });
 }
 ```
@@ -296,7 +326,7 @@ SSO 整合的核心是 4 個 HTTP 端點，任何後端框架都能實作：
 | `GET /api/auth/callback?code=xxx` | POST `SSO_URL/api/auth/sso/exchange` `{ code, client_id, client_secret }` → 取得 token → 存 httpOnly cookie |
 | `GET /api/auth/me` | 讀 cookie → `Authorization: Bearer {token}` 呼叫 `SSO_URL/api/auth/me` → 回傳結果 |
 | `GET /api/auth/logout` | 讀 cookie → POST `SSO_URL/api/auth/logout` (Bearer) → 刪 cookie → redirect |
-| `POST /api/auth/back-channel-logout` | 接收 `{ user_id }` → 回傳 `{ success: true }` |
+| `POST /api/auth/back-channel-logout` | 接收 `{ user_id, timestamp, signature }` → 驗證 HMAC 簽章 → 回傳 `{ success: true }` |
 
 注意事項：
 - 所有 server-to-server fetch 加上 `cache: "no-store"` + timeout
