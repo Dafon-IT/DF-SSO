@@ -9,9 +9,13 @@ const pool = new Pool({
   password: config.pg.password,
 });
 
-// 連線後設定 search_path
+// 連線後設定 search_path（使用白名單驗證，防止 SQL injection）
 pool.on('connect', (client) => {
-  client.query(`SET search_path TO ${config.pg.schema}`);
+  const schema = config.pg.schema;
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schema)) {
+    throw new Error(`Invalid schema name: ${schema}`);
+  }
+  client.query(`SET search_path TO ${schema}`);
 });
 
 pool.on('error', (err) => {

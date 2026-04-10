@@ -22,7 +22,7 @@ router.get('/', async (req, res) => {
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('LoginLog search error:', error.message);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 

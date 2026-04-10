@@ -1,7 +1,8 @@
+const crypto = require('crypto');
 const db = require('../config/database');
 
 /**
- * 取得所有未刪除的���名單
+ * 取得所有未刪除的白名單
  */
 async function findAll({ includeInactive = false } = {}) {
   const condition = includeInactive
@@ -25,7 +26,18 @@ async function findByUid(uid) {
 }
 
 /**
- * 依 name 取得單筆（啟用中）
+ * 依 app_id 取得單筆（啟用中）
+ */
+async function findByAppId(appId) {
+  const { rows } = await db.query(
+    'SELECT * FROM sso_allowed_list WHERE app_id = $1 AND is_active = TRUE AND is_deleted = FALSE LIMIT 1',
+    [appId]
+  );
+  return rows[0] || null;
+}
+
+/**
+ * 依 name 取得單筆（啟用中）— 保留向下相容
  */
 async function findByName(name) {
   const { rows } = await db.query(
@@ -36,10 +48,13 @@ async function findByName(name) {
 }
 
 /**
- * 新增白名單
- * 若 domain 已存在且 is_deleted = TRUE，則恢復該筆資��
+ * 新增白名單（自動產生 app_id + app_secret）
+ * 若 domain 已存在且 is_deleted = TRUE，則恢復該筆資料並重新產生 credentials
  */
-async function create({ domain, name, description }) {
+async function create({ domain, name, description, redirectUris }) {
+  const appSecret = crypto.randomBytes(32).toString('hex');
+  const uris = redirectUris && redirectUris.length > 0 ? redirectUris : [domain];
+
   // 檢查是否已存在但被軟刪除的資料
   const { rows: deleted } = await db.query(
     'SELECT * FROM sso_allowed_list WHERE domain = $1 AND is_deleted = TRUE',
@@ -49,19 +64,20 @@ async function create({ domain, name, description }) {
   if (deleted.length > 0) {
     const { rows } = await db.query(
       `UPDATE sso_allowed_list
-       SET is_deleted = FALSE, is_active = TRUE, name = $2, description = $3
+       SET is_deleted = FALSE, is_active = TRUE, name = $2, description = $3,
+           app_secret = $4, redirect_uris = $5
        WHERE ppid = $1
        RETURNING *`,
-      [deleted[0].ppid, name, description]
+      [deleted[0].ppid, name, description, appSecret, uris]
     );
     return rows[0];
   }
 
   const { rows } = await db.query(
-    `INSERT INTO sso_allowed_list (domain, name, description)
-     VALUES ($1, $2, $3)
+    `INSERT INTO sso_allowed_list (domain, name, description, app_secret, redirect_uris)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING *`,
-    [domain, name, description]
+    [domain, name, description, appSecret, uris]
   );
   return rows[0];
 }
@@ -69,7 +85,7 @@ async function create({ domain, name, description }) {
 /**
  * 更新白名單
  */
-async function update(uid, { domain, name, description, isActive }) {
+async function update(uid, { domain, name, description, isActive, redirectUris }) {
   const fields = [];
   const params = [];
   let paramIndex = 1;
@@ -90,6 +106,10 @@ async function update(uid, { domain, name, description, isActive }) {
     fields.push(`is_active = $${paramIndex++}`);
     params.push(isActive);
   }
+  if (redirectUris !== undefined) {
+    fields.push(`redirect_uris = $${paramIndex++}`);
+    params.push(redirectUris);
+  }
 
   if (fields.length === 0) return findByUid(uid);
 
@@ -97,6 +117,18 @@ async function update(uid, { domain, name, description, isActive }) {
   const { rows } = await db.query(
     `UPDATE sso_allowed_list SET ${fields.join(', ')} WHERE uid = $${paramIndex} AND is_deleted = FALSE RETURNING *`,
     params
+  );
+  return rows[0] || null;
+}
+
+/**
+ * 重新產生 app_secret
+ */
+async function regenerateSecret(uid) {
+  const newSecret = crypto.randomBytes(32).toString('hex');
+  const { rows } = await db.query(
+    'UPDATE sso_allowed_list SET app_secret = $1 WHERE uid = $2 AND is_deleted = FALSE RETURNING *',
+    [newSecret, uid]
   );
   return rows[0] || null;
 }
@@ -123,4 +155,26 @@ async function isDomainAllowed(domain) {
   return rows.length > 0;
 }
 
-module.exports = { findAll, findByUid, findByName, create, update, remove, isDomainAllowed };
+/**
+ * 取得所有已註冊的 redirect_uri origins（用於 CORS + back-channel）
+ */
+async function getAllOrigins() {
+  const { rows } = await db.query(
+    'SELECT redirect_uris FROM sso_allowed_list WHERE is_active = TRUE AND is_deleted = FALSE'
+  );
+  const origins = new Set();
+  for (const row of rows) {
+    if (row.redirect_uris) {
+      for (const uri of row.redirect_uris) {
+        origins.add(uri);
+      }
+    }
+  }
+  return [...origins];
+}
+
+module.exports = {
+  findAll, findByUid, findByAppId, findByName,
+  create, update, regenerateSecret, remove,
+  isDomainAllowed, getAllOrigins,
+};

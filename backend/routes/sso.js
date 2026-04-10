@@ -12,32 +12,34 @@ const AUTH_CODE_PREFIX = 'sso:code:';
 const AUTH_CODE_TTL = 60; // 一次性授權碼有效期 60 秒
 
 /**
- * GET /api/auth/sso/authorize?app=<name>&redirect_uri=<url>
- * SSO 授權端點：
- * - 用 app (白名單 name) 查詢，驗證 redirect_uri 的 origin 是否與該筆白名單 domain 匹配
+ * GET /api/auth/sso/authorize?client_id=<app_id>&redirect_uri=<url>
+ * SSO 授權端點（OAuth2 Authorization Code Flow）：
+ * - 用 client_id (app_id) 查詢白名單
+ * - 驗證 redirect_uri 的 origin 是否在該 App 的 redirect_uris 中
  * - 已有中央 session → 產生一次性 auth code，帶 code 重導到 redirect_uri
  * - 無 session → 走 Microsoft 登入，登入後重導到 redirect_uri
  */
 router.get('/authorize', async (req, res) => {
-  const { app, redirect_uri } = req.query;
+  const { client_id, redirect_uri } = req.query;
 
-  if (!app || !redirect_uri) {
-    return res.status(400).json({ error: 'Missing app or redirect_uri' });
+  if (!client_id || !redirect_uri) {
+    return res.status(400).json({ error: 'Missing client_id or redirect_uri' });
   }
 
-  // 用 name 查白名單
-  const allowed = await allowedListService.findByName(app);
-  if (!allowed) {
-    return res.status(403).json({ error: `App "${app}" not found or not active in allowed list` });
+  // 用 app_id 查白名單
+  const app = await allowedListService.findByAppId(client_id);
+  if (!app) {
+    return res.status(403).json({ error: 'Invalid client_id' });
   }
 
-  // 驗證 redirect_uri 的 origin 是否與白名單中的 domain 匹配
+  // 驗證 redirect_uri 的 origin 是否在已註冊的 redirect_uris 中
   let redirectUrl;
   try {
     redirectUrl = new URL(redirect_uri);
-    if (redirectUrl.origin !== allowed.domain) {
+    const uris = app.redirect_uris || [];
+    if (!uris.includes(redirectUrl.origin)) {
       return res.status(403).json({
-        error: `redirect_uri origin "${redirectUrl.origin}" does not match registered domain "${allowed.domain}"`,
+        error: `redirect_uri origin "${redirectUrl.origin}" is not registered for this app`,
       });
     }
   } catch {
@@ -48,12 +50,17 @@ router.get('/authorize', async (req, res) => {
   const token = req.cookies.token;
   if (token) {
     try {
-      const decoded = jwt.verify(token, config.jwtSecret);
+      const decoded = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
       const sessionStr = await redis.get(`${SESSION_PREFIX}${decoded.userId}`);
       if (sessionStr) {
         // 已登入，產生一次性 auth code
         const code = crypto.randomBytes(32).toString('hex');
-        const sessionData = JSON.parse(sessionStr);
+        let sessionData;
+        try {
+          sessionData = JSON.parse(sessionStr);
+        } catch {
+          return res.status(401).json({ error: 'Invalid session' });
+        }
 
         await redis.set(
           `${AUTH_CODE_PREFIX}${code}`,
@@ -92,15 +99,25 @@ router.get('/authorize', async (req, res) => {
 
 /**
  * POST /api/auth/sso/exchange
- * Auth Code 交換端點（server-to-server）：
- * Client App 後端用一次性 auth code 換取用戶資料 + JWT token
+ * Auth Code 交換端點（server-to-server，OAuth2 Token Endpoint）：
+ * Client App 後端用一次性 auth code + client credentials 換取用戶資料 + JWT token
  * 使用 Lua script 確保原子性（防止 race condition 重複使用）
  */
 router.post('/exchange', async (req, res) => {
-  const { code } = req.body;
+  const { code, client_id, client_secret } = req.body;
 
   if (!code || typeof code !== 'string' || code.length !== 64) {
     return res.status(400).json({ error: 'Invalid code format' });
+  }
+
+  // 驗證 client credentials
+  if (!client_id || !client_secret) {
+    return res.status(400).json({ error: 'Missing client_id or client_secret' });
+  }
+
+  const app = await allowedListService.findByAppId(client_id);
+  if (!app || app.app_secret !== client_secret) {
+    return res.status(401).json({ error: 'Invalid client credentials' });
   }
 
   const key = `${AUTH_CODE_PREFIX}${code}`;
@@ -120,13 +137,18 @@ router.post('/exchange', async (req, res) => {
     return res.status(401).json({ error: 'Invalid or expired code' });
   }
 
-  const userData = JSON.parse(dataStr);
+  let userData;
+  try {
+    userData = JSON.parse(dataStr);
+  } catch {
+    return res.status(500).json({ error: 'Invalid session data' });
+  }
 
   // 產生 JWT token 給 Client App 存儲（用於後續呼叫 /api/auth/me）
   const token = jwt.sign(
     { userId: userData.userId, email: userData.email, name: userData.name },
     config.jwtSecret,
-    { expiresIn: config.jwtExpiresIn }
+    { algorithm: 'HS256', expiresIn: config.jwtExpiresIn }
   );
 
   res.json({ user: userData, token });
@@ -135,7 +157,7 @@ router.post('/exchange', async (req, res) => {
 /**
  * GET /api/auth/sso/logout?redirect=<url>
  * 全域登出：清除中央 session + token cookie，back-channel 通知所有 client app
- * redirect 參數必須在白名單內，防止開放重導向攻擊
+ * redirect 參數必須在已註冊的 redirect_uris 中，防止開放重導向攻擊
  */
 router.get('/logout', async (req, res) => {
   const { redirect } = req.query;
@@ -145,7 +167,7 @@ router.get('/logout', async (req, res) => {
 
   if (token) {
     try {
-      const decoded = jwt.verify(token, config.jwtSecret);
+      const decoded = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
       userId = decoded.userId;
       await redis.del(`${SESSION_PREFIX}${decoded.userId}`);
     } catch {
@@ -153,20 +175,20 @@ router.get('/logout', async (req, res) => {
     }
   }
 
-  // Back-channel Logout：通知所有啟用的 client app
+  // Back-channel Logout：通知所有已註冊的 client app
   if (userId) {
     try {
-      const allowedDomains = await allowedListService.findAll();
-      const backChannelPromises = allowedDomains
-        .filter((d) => d.domain !== config.frontendUrl)
-        .map((d) =>
-          fetch(`${d.domain}/api/auth/back-channel-logout`, {
+      const origins = await allowedListService.getAllOrigins();
+      const backChannelPromises = origins
+        .filter((origin) => origin !== config.frontendUrl)
+        .map((origin) =>
+          fetch(`${origin}/api/auth/back-channel-logout`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: userId }),
             signal: AbortSignal.timeout(5000),
           }).catch((err) => {
-            console.warn(`Back-channel logout to ${d.domain} failed:`, err.message);
+            console.warn(`Back-channel logout to ${origin} failed:`, err.message);
           })
         );
       await Promise.allSettled(backChannelPromises);
@@ -177,15 +199,13 @@ router.get('/logout', async (req, res) => {
 
   res.clearCookie('token', { ...(config.cookieDomain && { domain: config.cookieDomain }), path: '/' });
 
-  // 驗證 redirect 是否在白名單中，防止開放重導向攻擊
+  // 驗證 redirect 是否在已註冊的 redirect_uris 中
   let safeRedirect = config.frontendUrl;
   if (redirect) {
     try {
       const redirectOrigin = new URL(redirect).origin;
-      const allowedDomains = await allowedListService.findAll();
-      const isAllowed = allowedDomains.some((d) => d.domain === redirectOrigin)
-        || redirectOrigin === config.frontendUrl;
-      if (isAllowed) {
+      const origins = await allowedListService.getAllOrigins();
+      if (origins.includes(redirectOrigin) || redirectOrigin === config.frontendUrl) {
         safeRedirect = redirect;
       } else {
         console.warn(`Blocked redirect to unauthorized origin: ${redirectOrigin}`);

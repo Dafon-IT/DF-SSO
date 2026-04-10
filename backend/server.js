@@ -13,6 +13,7 @@ const ssoRoutes = require('./routes/sso');
 const allowedListRoutes = require('./routes/allowedList');
 const loginLogRoutes = require('./routes/loginLog');
 const allowedListService = require('./services/allowedList');
+const adminAuth = require('./middleware/adminAuth');
 
 // 初始化連線
 const db = require('./config/database');
@@ -100,8 +101,7 @@ async function loadCorsOrigins() {
     return corsOriginsCache;
   }
   try {
-    const list = await allowedListService.findAll();
-    corsOriginsCache = list.map((item) => item.domain);
+    corsOriginsCache = await allowedListService.getAllOrigins();
     corsCacheTime = now;
   } catch (err) {
     console.error('Failed to load CORS origins from DB:', err.message);
@@ -148,8 +148,8 @@ app.use('/api/auth/logout', sessionLimiter);
 app.use('/api/auth/sso/exchange', exchangeLimiter);
 app.use('/api/auth/sso', authLimiter, ssoRoutes);
 app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api/allowed-list', allowedListRoutes);
-app.use('/api/login-log', loginLogRoutes);
+app.use('/api/allowed-list', adminAuth, allowedListRoutes);
+app.use('/api/login-log', adminAuth, loginLogRoutes);
 
 // Health check
 app.get('/api/health', async (req, res) => {
@@ -188,7 +188,7 @@ app.use((req, res) => {
 app.use((err, req, res, _next) => {
   // CORS 錯誤
   if (err.message && err.message.includes('CORS')) {
-    return res.status(403).json({ error: err.message });
+    return res.status(403).json({ error: 'CORS request not allowed' });
   }
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });

@@ -7,6 +7,7 @@ const { cca } = require('../config/msal');
 const loginLogService = require('../services/loginLog');
 const erpApi = require('../services/erpApi');
 const allowedListService = require('../services/allowedList');
+const adminManager = require('../services/adminManager');
 
 const router = express.Router();
 
@@ -25,7 +26,7 @@ function generateSystemToken(user) {
       name: user.name,
     },
     config.jwtSecret,
-    { expiresIn: config.jwtExpiresIn }
+    { algorithm: 'HS256', expiresIn: config.jwtExpiresIn }
   );
 }
 
@@ -62,7 +63,7 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
 
   if (oauthError) {
     console.error('Microsoft OAuth Error:', oauthError, error_description);
-    return res.redirect(`${config.frontendUrl}?error=${oauthError}`);
+    return res.redirect(`${config.frontendUrl}?error=${encodeURIComponent(oauthError)}`);
   }
 
   if (!state || state !== req.session.oauthState) {
@@ -164,6 +165,17 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
     console.error('Failed to log login:', error.message);
   }
 
+  // 檢查是否有 SSO 重導目標（來自客戶端 App 的 authorize 流程）
+  const ssoRedirect = req.session.ssoRedirect;
+
+  // 若非 SSO 流程（直接登入管理後台），檢查管理員權限
+  if (!ssoRedirect) {
+    const isAdmin = await adminManager.isAdminByOidOrEmail(claims.oid, email);
+    if (!isAdmin) {
+      return res.redirect(`${config.frontendUrl}?error=not_admin`);
+    }
+  }
+
   // Step 7: 發放 JWT + 寫入 Redis Session
   const user = {
     id: claims.oid,
@@ -202,8 +214,6 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
     ...(config.cookieDomain && { domain: config.cookieDomain }),
   });
 
-  // 檢查是否有 SSO 重導目標（來自客戶端 App 的 authorize 流程）
-  const ssoRedirect = req.session.ssoRedirect;
   if (ssoRedirect) {
     delete req.session.ssoRedirect;
 
@@ -252,7 +262,7 @@ router.get('/me', async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(token, config.jwtSecret);
+    const decoded = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
 
     // 驗證 Redis Session
     const sessionStr = await redis.get(`${SESSION_PREFIX}${decoded.userId}`);
@@ -261,7 +271,13 @@ router.get('/me', async (req, res) => {
       return res.status(401).json({ error: 'Session expired' });
     }
 
-    const session = JSON.parse(sessionStr);
+    let session;
+    try {
+      session = JSON.parse(sessionStr);
+    } catch {
+      res.clearCookie('token', { ...(config.cookieDomain && { domain: config.cookieDomain }), path: '/' });
+      return res.status(401).json({ error: 'Invalid session' });
+    }
     res.json({ user: session });
   } catch (error) {
     res.clearCookie('token', { ...(config.cookieDomain && { domain: config.cookieDomain }), path: '/' });
@@ -289,28 +305,28 @@ router.post('/logout', async (req, res) => {
 
   if (token) {
     try {
-      const decoded = jwt.verify(token, config.jwtSecret);
+      const decoded = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
       userId = decoded.userId;
       await redis.del(`${SESSION_PREFIX}${decoded.userId}`);
-    } catch (error) {
+    } catch {
       // token 無效也繼續清除 cookie
     }
   }
 
-  // Back-channel Logout：通知所有啟用的 client app
+  // Back-channel Logout：通知所有已註冊的 client app
   if (userId) {
     try {
-      const allowedDomains = await allowedListService.findAll();
-      const backChannelPromises = allowedDomains
-        .filter((d) => d.domain !== config.frontendUrl)
-        .map((d) =>
-          fetch(`${d.domain}/api/auth/back-channel-logout`, {
+      const origins = await allowedListService.getAllOrigins();
+      const backChannelPromises = origins
+        .filter((origin) => origin !== config.frontendUrl)
+        .map((origin) =>
+          fetch(`${origin}/api/auth/back-channel-logout`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: userId }),
             signal: AbortSignal.timeout(5000),
           }).catch((err) => {
-            console.warn(`Back-channel logout to ${d.domain} failed:`, err.message);
+            console.warn(`Back-channel logout to ${origin} failed:`, err.message);
           })
         );
       await Promise.allSettled(backChannelPromises);

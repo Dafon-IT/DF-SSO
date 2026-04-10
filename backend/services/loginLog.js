@@ -31,7 +31,9 @@ async function create({ azureOid, email, name, preferredUsername, erpData, statu
 /**
  * 搜尋登入紀錄（支援日期範圍、狀態、email 篩選、分頁）
  */
-async function search({ email, status, startDate, endDate, page = 1, pageSize = 20 }) {
+async function search({ email, status, startDate, endDate, page = 1, pageSize = 20 } = {}) {
+  // 限制 pageSize 上限，防止 DoS
+  pageSize = Math.min(Math.max(1, pageSize), 100);
   const conditions = [];
   const params = [];
   let paramIndex = 1;
