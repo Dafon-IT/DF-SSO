@@ -27,6 +27,9 @@ interface AllowedItem {
   domain: string;
   name: string;
   description: string;
+  app_id: string;
+  app_secret_last4: string | null;
+  redirect_uris: string[];
   is_active: boolean;
   is_deleted: boolean;
   created_at: string;
@@ -169,7 +172,8 @@ function AllowedListPanel() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState<AllowedItem | null>(null);
-  const [form, setForm] = useState({ domain: "", name: "", description: "" });
+  const [form, setForm] = useState({ domain: "", name: "", description: "", redirect_uris: "" });
+  const [credentialsMap, setCredentialsMap] = useState<Record<string, { app_id: string; app_secret: string }>>({});
 
   const fetchList = useCallback(async () => {
     setLoading(true);
@@ -197,17 +201,28 @@ function AllowedListPanel() {
       ? `${API}/api/allowed-list/${editItem.uid}`
       : `${API}/api/allowed-list`;
 
+    const payload: Record<string, unknown> = {
+      domain: form.domain,
+      name: form.name,
+      description: form.description,
+    };
+    const uris = form.redirect_uris
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (uris.length > 0) payload.redirect_uris = uris;
+
     const res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify(form),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (data.success) {
       setShowForm(false);
       setEditItem(null);
-      setForm({ domain: "", name: "", description: "" });
+      setForm({ domain: "", name: "", description: "", redirect_uris: "" });
       fetchList();
     } else {
       alert(data.error || "操作失敗");
@@ -220,6 +235,7 @@ function AllowedListPanel() {
       domain: item.domain,
       name: item.name || "",
       description: item.description || "",
+      redirect_uris: (item.redirect_uris || []).join("\n"),
     });
     setShowForm(true);
   };
@@ -245,8 +261,55 @@ function AllowedListPanel() {
 
   const handleAdd = () => {
     setEditItem(null);
-    setForm({ domain: "", name: "", description: "" });
+    setForm({ domain: "", name: "", description: "", redirect_uris: "" });
     setShowForm(true);
+  };
+
+  const handleShowCredentials = async (item: AllowedItem) => {
+    if (credentialsMap[item.uid]) {
+      // toggle off
+      setCredentialsMap((prev) => {
+        const next = { ...prev };
+        delete next[item.uid];
+        return next;
+      });
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/api/allowed-list/${item.uid}/credentials`, {
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCredentialsMap((prev) => ({ ...prev, [item.uid]: data.data }));
+      } else {
+        alert(data.error || "取得 credentials 失敗");
+      }
+    } catch {
+      alert("無法取得 credentials");
+    }
+  };
+
+  const handleRegenerateSecret = async (item: AllowedItem) => {
+    if (!confirm(`確定要重新產生「${item.name || item.domain}」的 app_secret 嗎？\n現有的 secret 將立即失效！`)) return;
+    try {
+      const res = await fetch(`${API}/api/allowed-list/${item.uid}/regenerate-secret`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCredentialsMap((prev) => ({
+          ...prev,
+          [item.uid]: { app_id: data.data.app_id, app_secret: data.data.app_secret },
+        }));
+        alert("app_secret 已重新產生，請立即複製！");
+      } else {
+        alert(data.error || "操作失敗");
+      }
+    } catch {
+      alert("操作失敗");
+    }
   };
 
   return (
@@ -309,6 +372,21 @@ function AllowedListPanel() {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
+            <div>
+              <label className="block text-base font-medium text-gray-700 mb-1">
+                Redirect URIs（每行一個 origin）
+              </label>
+              <textarea
+                rows={3}
+                value={form.redirect_uris}
+                onChange={(e) => setForm({ ...form, redirect_uris: e.target.value })}
+                placeholder={"http://localhost:3100\nhttps://app.apps.zerozero.tw"}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <p className="mt-1 text-sm text-gray-400">
+                允許的 redirect_uri origin（dev/test/prod 各自的 URL），最多 10 筆
+              </p>
+            </div>
             <div className="flex gap-2 pt-2">
               <button
                 type="submit"
@@ -338,60 +416,89 @@ function AllowedListPanel() {
         ) : items.length === 0 ? (
           <p className="p-6 text-base text-gray-500">尚無資料</p>
         ) : (
-          <table className="w-full text-base">
-            <thead className="bg-gray-50 text-left text-gray-500">
-              <tr>
-                <th className="px-4 py-3 font-medium">網域</th>
-                <th className="px-4 py-3 font-medium">名稱</th>
-                <th className="px-4 py-3 font-medium">說明</th>
-                <th className="px-4 py-3 font-medium">狀態</th>
-                <th className="px-4 py-3 font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {items.map((item) => (
-                <tr key={item.uid}>
-                  <td className="px-4 py-3 font-mono text-sm text-gray-900">
-                    {item.domain}
-                  </td>
-                  <td className="px-4 py-3 text-gray-900">
-                    {item.name || "-"}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {item.description || "-"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleToggleActive(item)}
-                      className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-medium ${
-                        item.is_active
-                          ? "bg-green-100 text-green-700"
-                          : "bg-gray-100 text-gray-500"
-                      }`}
-                    >
-                      {item.is_active ? "啟用" : "停用"}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-2">
+          <div className="divide-y divide-gray-100">
+            {items.map((item) => {
+              const creds = credentialsMap[item.uid];
+              return (
+                <div key={item.uid} className="px-4 py-4">
+                  {/* Row 1: basic info */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
                       <button
-                        onClick={() => handleEdit(item)}
-                        className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                        onClick={() => handleToggleActive(item)}
+                        className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-medium ${
+                          item.is_active
+                            ? "bg-green-100 text-green-700"
+                            : "bg-gray-100 text-gray-500"
+                        }`}
                       >
+                        {item.is_active ? "啟用" : "停用"}
+                      </button>
+                      <span className="font-semibold text-gray-900">{item.name || "-"}</span>
+                      <span className="text-sm text-gray-400">{item.description}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => handleShowCredentials(item)} className="text-purple-600 hover:text-purple-800 text-sm font-medium">
+                        {creds ? "隱藏金鑰" : "顯示金鑰"}
+                      </button>
+                      <button onClick={() => handleEdit(item)} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
                         編輯
                       </button>
-                      <button
-                        onClick={() => handleDelete(item)}
-                        className="text-red-600 hover:text-red-800 text-sm font-medium"
-                      >
+                      <button onClick={() => handleDelete(item)} className="text-red-600 hover:text-red-800 text-sm font-medium">
                         刪除
                       </button>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+
+                  {/* Row 2: domain + redirect_uris */}
+                  <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                    <div>
+                      <span className="text-gray-400">Domain: </span>
+                      <span className="font-mono text-gray-700">{item.domain}</span>
+                    </div>
+                    {item.redirect_uris && item.redirect_uris.length > 0 && (
+                      <div>
+                        <span className="text-gray-400">Redirect URIs: </span>
+                        {item.redirect_uris.map((uri, i) => (
+                          <span key={i} className="inline-block rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-600 mr-1">
+                            {uri}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Row 3: app_id (always visible) */}
+                  <div className="mt-2 text-sm">
+                    <span className="text-gray-400">App ID: </span>
+                    <code className="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700 select-all">{item.app_id}</code>
+                    <span className="ml-4 text-gray-400">Secret: </span>
+                    <span className="text-xs text-gray-500">{item.app_secret_last4 || "****"}</span>
+                  </div>
+
+                  {/* Row 4: full credentials (revealed) */}
+                  {creds && (
+                    <div className="mt-2 rounded-lg bg-yellow-50 border border-yellow-200 p-3 text-sm space-y-1">
+                      <div>
+                        <span className="font-medium text-yellow-800">App ID: </span>
+                        <code className="select-all text-xs">{creds.app_id}</code>
+                      </div>
+                      <div>
+                        <span className="font-medium text-yellow-800">App Secret: </span>
+                        <code className="select-all text-xs break-all">{creds.app_secret}</code>
+                      </div>
+                      <button
+                        onClick={() => handleRegenerateSecret(item)}
+                        className="mt-1 text-xs text-red-600 hover:text-red-800 font-medium"
+                      >
+                        重新產生 Secret
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
