@@ -7,7 +7,9 @@ const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
+const swaggerUi = require('swagger-ui-express');
 const config = require('./config');
+const swaggerSpec = require('./config/swagger');
 const authRoutes = require('./routes/auth');
 const ssoRoutes = require('./routes/sso');
 const allowedListRoutes = require('./routes/allowedList');
@@ -101,7 +103,9 @@ async function loadCorsOrigins() {
     return corsOriginsCache;
   }
   try {
-    corsOriginsCache = await allowedListService.getAllOrigins();
+    const dbOrigins = await allowedListService.getAllOrigins();
+    // SSO Frontend 自身永遠允許 CORS
+    corsOriginsCache = [...new Set([config.frontendUrl, ...dbOrigins])];
     corsCacheTime = now;
   } catch (err) {
     console.error('Failed to load CORS origins from DB:', err.message);
@@ -138,6 +142,16 @@ app.use(session({
     maxAge: 10 * 60 * 1000, // 10 分鐘（僅用於 OAuth state）
   },
 }));
+
+// ============================================
+// Swagger API 文件
+// ============================================
+
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customSiteTitle: 'DF-SSO API Docs',
+  customCss: '.swagger-ui .topbar { display: none }',
+}));
+app.get('/api/docs.json', (req, res) => res.json(swaggerSpec));
 
 // ============================================
 // Routes（搭配 rate limiting）
