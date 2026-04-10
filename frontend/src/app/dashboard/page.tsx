@@ -312,17 +312,22 @@ function AllowedListPanel() {
     }
   };
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900">
-          白名單網域管理
-        </h2>
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">應用程式管理</h2>
+          <p className="text-sm text-gray-500 mt-0.5">管理 SSO 串接的 Client App 與 OAuth2 Credentials</p>
+        </div>
         <button
           onClick={handleAdd}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700 transition-colors"
+          className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm"
         >
-          新增網域
+          + 新增應用
         </button>
       </div>
 
@@ -330,52 +335,44 @@ function AllowedListPanel() {
       {showForm && (
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
           <h3 className="text-base font-semibold text-gray-900 mb-4">
-            {editItem ? "編輯網域" : "新增網域"}
+            {editItem ? "編輯應用" : "新增應用"}
           </h3>
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div>
-              <label className="block text-base font-medium text-gray-700 mb-1">
-                網域 *
-              </label>
-              <input
-                type="text"
-                required
-                value={form.domain}
-                onChange={(e) => setForm({ ...form, domain: e.target.value })}
-                placeholder="https://crm.df-recycle.com.tw"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">網域 *</label>
+                <input
+                  type="text"
+                  required
+                  value={form.domain}
+                  onChange={(e) => setForm({ ...form, domain: e.target.value })}
+                  placeholder="https://crm.df-recycle.com.tw"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">系統名稱</label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="CRM 系統"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
             </div>
             <div>
-              <label className="block text-base font-medium text-gray-700 mb-1">
-                系統名稱
-              </label>
-              <input
-                type="text"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="CRM 系統"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-base font-medium text-gray-700 mb-1">
-                說明
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">說明</label>
               <input
                 type="text"
                 value={form.description}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
                 placeholder="系統說明"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-base font-medium text-gray-700 mb-1">
-                Redirect URIs（每行一個 origin）
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Redirect URIs</label>
               <textarea
                 rows={3}
                 value={form.redirect_uris}
@@ -383,24 +380,16 @@ function AllowedListPanel() {
                 placeholder={"http://localhost:3100\nhttps://app.apps.zerozero.tw"}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-              <p className="mt-1 text-sm text-gray-400">
-                允許的 redirect_uri origin（dev/test/prod 各自的 URL），最多 10 筆
-              </p>
+              <p className="mt-1 text-xs text-gray-400">每行一個 origin（dev / test / prod），最多 10 筆</p>
             </div>
-            <div className="flex gap-2 pt-2">
-              <button
-                type="submit"
-                className="rounded-lg bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700"
-              >
-                {editItem ? "儲存" : "新增"}
+            <div className="flex gap-2 pt-1">
+              <button type="submit" className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700">
+                {editItem ? "儲存變更" : "建立應用"}
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setEditItem(null);
-                }}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-base font-medium text-gray-700 hover:bg-gray-50"
+                onClick={() => { setShowForm(false); setEditItem(null); }}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
               >
                 取消
               </button>
@@ -409,98 +398,127 @@ function AllowedListPanel() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
-        {loading ? (
-          <p className="p-6 text-base text-gray-500">載入中...</p>
-        ) : items.length === 0 ? (
-          <p className="p-6 text-base text-gray-500">尚無資料</p>
-        ) : (
-          <div className="divide-y divide-gray-100">
-            {items.map((item) => {
-              const creds = credentialsMap[item.uid];
-              return (
-                <div key={item.uid} className="px-4 py-4">
-                  {/* Row 1: basic info */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => handleToggleActive(item)}
-                        className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-medium ${
-                          item.is_active
-                            ? "bg-green-100 text-green-700"
-                            : "bg-gray-100 text-gray-500"
-                        }`}
-                      >
-                        {item.is_active ? "啟用" : "停用"}
-                      </button>
-                      <span className="font-semibold text-gray-900">{item.name || "-"}</span>
-                      <span className="text-sm text-gray-400">{item.description}</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => handleShowCredentials(item)} className="text-purple-600 hover:text-purple-800 text-sm font-medium">
-                        {creds ? "隱藏金鑰" : "顯示金鑰"}
-                      </button>
-                      <button onClick={() => handleEdit(item)} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                        編輯
-                      </button>
-                      <button onClick={() => handleDelete(item)} className="text-red-600 hover:text-red-800 text-sm font-medium">
-                        刪除
-                      </button>
-                    </div>
+      {/* Cards */}
+      {loading ? (
+        <p className="py-12 text-center text-sm text-gray-400">載入中...</p>
+      ) : items.length === 0 ? (
+        <p className="py-12 text-center text-sm text-gray-400">尚無應用程式</p>
+      ) : (
+        <div className="grid gap-4">
+          {items.map((item) => {
+            const creds = credentialsMap[item.uid];
+            return (
+              <div key={item.uid} className="rounded-xl bg-white shadow-sm border border-gray-200 overflow-hidden">
+                {/* Card Header */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                  <div className="flex items-center gap-3">
+                    <div className={`h-2.5 w-2.5 rounded-full ${item.is_active ? "bg-green-500" : "bg-gray-300"}`} />
+                    <h3 className="font-semibold text-gray-900">{item.name || "未命名應用"}</h3>
+                    {item.description && <span className="text-sm text-gray-400">- {item.description}</span>}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleToggleActive(item)}
+                      className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                        item.is_active
+                          ? "bg-green-50 text-green-700 hover:bg-green-100"
+                          : "bg-gray-50 text-gray-500 hover:bg-gray-100"
+                      }`}
+                    >
+                      {item.is_active ? "啟用中" : "已停用"}
+                    </button>
+                    <button onClick={() => handleEdit(item)} className="rounded-md px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors">
+                      編輯
+                    </button>
+                    <button onClick={() => handleDelete(item)} className="rounded-md px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors">
+                      刪除
+                    </button>
+                  </div>
+                </div>
+
+                {/* Card Body */}
+                <div className="px-5 py-4 space-y-3">
+                  {/* Domain */}
+                  <div className="flex items-start gap-2">
+                    <span className="w-24 shrink-0 text-xs font-medium text-gray-400 pt-0.5">Domain</span>
+                    <code className="text-sm text-gray-700 font-mono">{item.domain}</code>
                   </div>
 
-                  {/* Row 2: domain + redirect_uris */}
-                  <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                    <div>
-                      <span className="text-gray-400">Domain: </span>
-                      <span className="font-mono text-gray-700">{item.domain}</span>
-                    </div>
-                    {item.redirect_uris && item.redirect_uris.length > 0 && (
-                      <div>
-                        <span className="text-gray-400">Redirect URIs: </span>
+                  {/* Redirect URIs */}
+                  {item.redirect_uris && item.redirect_uris.length > 0 && (
+                    <div className="flex items-start gap-2">
+                      <span className="w-24 shrink-0 text-xs font-medium text-gray-400 pt-1">Redirect URIs</span>
+                      <div className="flex flex-wrap gap-1.5">
                         {item.redirect_uris.map((uri, i) => (
-                          <span key={i} className="inline-block rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-600 mr-1">
+                          <span key={i} className="inline-flex rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">
                             {uri}
                           </span>
                         ))}
                       </div>
-                    )}
+                    </div>
+                  )}
+
+                  {/* App ID */}
+                  <div className="flex items-start gap-2">
+                    <span className="w-24 shrink-0 text-xs font-medium text-gray-400 pt-0.5">App ID</span>
+                    <div className="flex items-center gap-2">
+                      <code className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-700 font-mono select-all">{item.app_id}</code>
+                      <button onClick={() => copyToClipboard(item.app_id)} className="text-gray-300 hover:text-gray-500 transition-colors" title="複製">
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Row 3: app_id (always visible) */}
-                  <div className="mt-2 text-sm">
-                    <span className="text-gray-400">App ID: </span>
-                    <code className="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700 select-all">{item.app_id}</code>
-                    <span className="ml-4 text-gray-400">Secret: </span>
-                    <span className="text-xs text-gray-500">{item.app_secret_last4 || "****"}</span>
+                  {/* App Secret (masked) */}
+                  <div className="flex items-start gap-2">
+                    <span className="w-24 shrink-0 text-xs font-medium text-gray-400 pt-0.5">App Secret</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400 font-mono">{item.app_secret_last4 || "••••••••"}</span>
+                      <button
+                        onClick={() => handleShowCredentials(item)}
+                        className={`text-xs font-medium transition-colors ${creds ? "text-amber-600 hover:text-amber-700" : "text-indigo-600 hover:text-indigo-700"}`}
+                      >
+                        {creds ? "隱藏" : "顯示完整金鑰"}
+                      </button>
+                    </div>
                   </div>
+                </div>
 
-                  {/* Row 4: full credentials (revealed) */}
-                  {creds && (
-                    <div className="mt-2 rounded-lg bg-yellow-50 border border-yellow-200 p-3 text-sm space-y-1">
-                      <div>
-                        <span className="font-medium text-yellow-800">App ID: </span>
-                        <code className="select-all text-xs">{creds.app_id}</code>
-                      </div>
-                      <div>
-                        <span className="font-medium text-yellow-800">App Secret: </span>
-                        <code className="select-all text-xs break-all">{creds.app_secret}</code>
-                      </div>
+                {/* Credentials Panel (revealed) */}
+                {creds && (
+                  <div className="mx-5 mb-4 rounded-lg bg-amber-50 border border-amber-200 overflow-hidden">
+                    <div className="px-4 py-2.5 bg-amber-100/50 border-b border-amber-200 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-amber-800">Client Credentials</span>
                       <button
                         onClick={() => handleRegenerateSecret(item)}
-                        className="mt-1 text-xs text-red-600 hover:text-red-800 font-medium"
+                        className="rounded-md bg-white border border-amber-300 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 transition-colors"
                       >
                         重新產生 Secret
                       </button>
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                    <div className="px-4 py-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-20 text-xs font-medium text-amber-700">App ID</span>
+                        <code className="flex-1 rounded bg-white border border-amber-200 px-2.5 py-1 text-xs font-mono text-gray-800 select-all">{creds.app_id}</code>
+                        <button onClick={() => copyToClipboard(creds.app_id)} className="text-amber-400 hover:text-amber-600 transition-colors" title="複製">
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-20 text-xs font-medium text-amber-700">Secret</span>
+                        <code className="flex-1 rounded bg-white border border-amber-200 px-2.5 py-1 text-xs font-mono text-gray-800 select-all break-all">{creds.app_secret}</code>
+                        <button onClick={() => copyToClipboard(creds.app_secret)} className="text-amber-400 hover:text-amber-600 transition-colors" title="複製">
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
