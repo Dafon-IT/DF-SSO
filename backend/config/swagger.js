@@ -373,6 +373,157 @@ const swaggerSpec = {
       },
     },
 
+    // ───── Admin - 管理員 ─────
+    '/api/admin-manager': {
+      get: {
+        tags: ['Admin - 管理員'],
+        summary: '取得所有管理員',
+        description: '回傳所有管理員（含停用的），`is_newer = true` 表示尚未登入過。',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        responses: {
+          200: {
+            description: '成功',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { type: 'array', items: { $ref: '#/components/schemas/AdminItem' } },
+                  },
+                },
+              },
+            },
+          },
+          401: { description: '未認證', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          403: { description: '非管理員', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+      post: {
+        tags: ['Admin - 管理員'],
+        summary: '新增管理員',
+        description:
+          '僅需提供 email。新管理員 `is_newer = true`，首次登入 SSO 後自動填入 `azure_oid`、`name` 並設為 `false`。',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AdminItemCreate' },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: '建立成功',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { $ref: '#/components/schemas/AdminItem' },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: '參數錯誤', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithSuccess' } } } },
+          409: { description: 'Email 已存在', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithSuccess' } } } },
+        },
+      },
+    },
+
+    '/api/admin-manager/{uid}': {
+      get: {
+        tags: ['Admin - 管理員'],
+        summary: '取得單筆管理員',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'uid', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: {
+            description: '成功',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { $ref: '#/components/schemas/AdminItem' },
+                  },
+                },
+              },
+            },
+          },
+          404: { description: '找不到', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithSuccess' } } } },
+        },
+      },
+      put: {
+        tags: ['Admin - 管理員'],
+        summary: '更新管理員',
+        description: '支援部分更新（email, is_active）。',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'uid', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AdminItemUpdate' },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: '更新成功',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { $ref: '#/components/schemas/AdminItem' },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: '參數錯誤', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithSuccess' } } } },
+          404: { description: '找不到', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithSuccess' } } } },
+        },
+      },
+      delete: {
+        tags: ['Admin - 管理員'],
+        summary: '軟刪除管理員',
+        description: '無法刪除自己。',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'uid', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: {
+            description: '刪除成功',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { $ref: '#/components/schemas/AdminItem' },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: '無法刪除自己', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithSuccess' } } } },
+          404: { description: '找不到', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithSuccess' } } } },
+        },
+      },
+    },
+
     // ───── Admin - 登入紀錄 ─────
     '/api/login-log': {
       get: {
@@ -597,6 +748,37 @@ const swaggerSpec = {
             type: 'array', items: { type: 'string', format: 'uri' },
             maxItems: 10,
           },
+        },
+      },
+
+      // ── 管理員 ──
+      AdminItem: {
+        type: 'object',
+        properties: {
+          ppid: { type: 'integer', example: 1 },
+          uid: { type: 'string', format: 'uuid' },
+          azure_oid: { type: 'string', nullable: true, description: '首次登入後自動填入' },
+          email: { type: 'string', format: 'email', example: 'admin@df-recycle.com' },
+          name: { type: 'string', nullable: true, description: '首次登入後自動填入' },
+          is_active: { type: 'boolean', example: true },
+          is_newer: { type: 'boolean', description: 'true = 尚未登入過，缺少 azure_oid / name', example: false },
+          created_at: { type: 'string', format: 'date-time' },
+          updated_at: { type: 'string', format: 'date-time' },
+        },
+      },
+      AdminItemCreate: {
+        type: 'object',
+        required: ['email'],
+        properties: {
+          email: { type: 'string', format: 'email', description: '管理員 Email（必須是 Azure AD 帳號）', example: 'new-admin@df-recycle.com' },
+        },
+      },
+      AdminItemUpdate: {
+        type: 'object',
+        description: '支援部分更新',
+        properties: {
+          email: { type: 'string', format: 'email' },
+          is_active: { type: 'boolean' },
         },
       },
 

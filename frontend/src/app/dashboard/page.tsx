@@ -32,6 +32,17 @@ interface AllowedItem {
   created_at: string;
 }
 
+interface AdminItem {
+  ppid: number;
+  uid: string;
+  azure_oid: string | null;
+  email: string;
+  name: string | null;
+  is_active: boolean;
+  is_newer: boolean;
+  created_at: string;
+}
+
 interface LoginLog {
   ppid: number;
   uid: string;
@@ -52,7 +63,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"allowed" | "logs">("allowed");
+  const [activeTab, setActiveTab] = useState<"allowed" | "logs" | "admins">("allowed");
 
   useEffect(() => {
     fetch(`${API}/api/auth/me`, { credentials: "include" })
@@ -127,12 +138,24 @@ export default function DashboardPage() {
           >
             登入紀錄
           </button>
+          <button
+            onClick={() => setActiveTab("admins")}
+            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors ${
+              activeTab === "admins"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            管理員
+          </button>
         </div>
       </div>
 
       {/* Content */}
       <main className="m-6">
-        {activeTab === "allowed" ? <AllowedListPanel /> : <LoginLogPanel />}
+        {activeTab === "allowed" && <AllowedListPanel />}
+        {activeTab === "logs" && <LoginLogPanel />}
+        {activeTab === "admins" && <AdminManagerPanel />}
       </main>
     </div>
   );
@@ -610,6 +633,205 @@ function LoginLogPanel() {
               下一頁
             </button>
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// Admin Manager Panel
+// ============================================
+function AdminManagerPanel() {
+  const [admins, setAdmins] = useState<AdminItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ email: "" });
+
+  const fetchAdmins = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/admin-manager`, {
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) setAdmins(data.data);
+    } catch (e) {
+      console.error("Fetch admin list error:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAdmins();
+  }, [fetchAdmins]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await fetch(`${API}/api/admin-manager`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ email: form.email }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setShowForm(false);
+      setForm({ email: "" });
+      fetchAdmins();
+    } else {
+      alert(data.error || "操作失敗");
+    }
+  };
+
+  const handleToggleActive = async (item: AdminItem) => {
+    await fetch(`${API}/api/admin-manager/${item.uid}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ is_active: !item.is_active }),
+    });
+    fetchAdmins();
+  };
+
+  const handleDelete = async (item: AdminItem) => {
+    if (!confirm(`確定要刪除管理員「${item.name || item.email}」嗎？`)) return;
+    const res = await fetch(`${API}/api/admin-manager/${item.uid}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.error || "刪除失敗");
+    }
+    fetchAdmins();
+  };
+
+  const formatDate = (d: string) => {
+    return new Date(d).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-gray-900">管理員名單</h2>
+        <button
+          onClick={() => {
+            setForm({ email: "" });
+            setShowForm(true);
+          }}
+          className="rounded-lg bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700 transition-colors"
+        >
+          新增管理員
+        </button>
+      </div>
+
+      {/* Form */}
+      {showForm && (
+        <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
+          <h3 className="text-base font-semibold text-gray-900 mb-4">
+            新增管理員
+          </h3>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="block text-base font-medium text-gray-700 mb-1">
+                Email *
+              </label>
+              <input
+                type="email"
+                required
+                value={form.email}
+                onChange={(e) => setForm({ email: e.target.value })}
+                placeholder="new-admin@df-recycle.com"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <p className="mt-1 text-sm text-gray-400">
+                新管理員首次登入 SSO 後會自動填入姓名與 Azure AD 資訊
+              </p>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="submit"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700"
+              >
+                新增
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-base font-medium text-gray-700 hover:bg-gray-50"
+              >
+                取消
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        {loading ? (
+          <p className="p-6 text-base text-gray-500">載入中...</p>
+        ) : admins.length === 0 ? (
+          <p className="p-6 text-base text-gray-500">尚無資料</p>
+        ) : (
+          <table className="w-full text-base">
+            <thead className="bg-gray-50 text-left text-gray-500">
+              <tr>
+                <th className="px-4 py-3 font-medium">Email</th>
+                <th className="px-4 py-3 font-medium">姓名</th>
+                <th className="px-4 py-3 font-medium">狀態</th>
+                <th className="px-4 py-3 font-medium">登入狀態</th>
+                <th className="px-4 py-3 font-medium">建立時間</th>
+                <th className="px-4 py-3 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {admins.map((item) => (
+                <tr key={item.uid}>
+                  <td className="px-4 py-3 text-gray-900">{item.email}</td>
+                  <td className="px-4 py-3 text-gray-900">
+                    {item.name || "-"}
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => handleToggleActive(item)}
+                      className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-medium ${
+                        item.is_active
+                          ? "bg-green-100 text-green-700"
+                          : "bg-gray-100 text-gray-500"
+                      }`}
+                    >
+                      {item.is_active ? "啟用" : "停用"}
+                    </button>
+                  </td>
+                  <td className="px-4 py-3">
+                    {item.is_newer ? (
+                      <span className="inline-block rounded-full bg-yellow-100 px-2.5 py-0.5 text-sm font-medium text-yellow-700">
+                        未登入
+                      </span>
+                    ) : (
+                      <span className="inline-block rounded-full bg-blue-100 px-2.5 py-0.5 text-sm font-medium text-blue-700">
+                        已啟用
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                    {formatDate(item.created_at)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => handleDelete(item)}
+                      className="text-red-600 hover:text-red-800 text-sm font-medium"
+                    >
+                      刪除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </div>
