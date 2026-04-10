@@ -38,7 +38,7 @@ services:
       - "35890"
     environment:
       PORT: 35890
-      NODE_ENV: production
+      NODE_ENV: test
       FRONTEND_URL: ${FRONTEND_URL}
       SESSION_SECRET: ${SESSION_SECRET}
       JWT_SECRET: ${JWT_SECRET}
@@ -78,7 +78,7 @@ services:
     expose:
       - "3000"
     environment:
-      NODE_ENV: production
+      NODE_ENV: test
       SERVICE_URL_FRONTEND_3000:
 
   # ============================================
