@@ -87,7 +87,6 @@ CREATE TABLE IF NOT EXISTS sso_allowed_list (
 
   domain      VARCHAR(255) NOT NULL,         -- 網域名稱 (e.g. https://crm.df-recycle.com.tw)
   name        VARCHAR(255),                  -- 系統名稱 (e.g. CRM 系統)
-  env         VARCHAR(20) NOT NULL DEFAULT 'local',  -- 環境：production / test / local
   description TEXT,                          -- 說明
 
   is_active   BOOLEAN NOT NULL DEFAULT TRUE,
