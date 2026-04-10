@@ -79,28 +79,17 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 
 ### SSO Backend 環境變數
 
-```env
-PORT=35890
-NODE_ENV=production
-FRONTEND_URL=https://df-sso-management-test.apps.zerozero.tw
-SESSION_SECRET=<32+ char>
-JWT_SECRET=<32+ char>
-JWT_EXPIRES_IN=24h
-AZURE_CLIENT_ID=<uuid>
-AZURE_CLIENT_SECRET=<secret>
-AZURE_TENANT_ID=<uuid>
-AZURE_REDIRECT_URI=https://df-sso-login-test.apps.zerozero.tw/api/auth/{authPath}/redirect
-PG_HOST=postgres
-PG_PORT=5432
-PG_DATABASE=SSO-v1
-PG_USER=postgres
-PG_PASSWORD=<password>
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_DB=15
-COOKIE_DOMAIN=.apps.zerozero.tw
-ROPC_REDIRECT_URL=https://df-sso-management-test.apps.zerozero.tw/dashboard
-```
+參考 `.env.example` 和 `.env.coolify` 設定，主要項目：
+
+| 類別 | 變數 | 說明 |
+|------|------|------|
+| Server | `NODE_ENV` | `test` / `production` |
+| Server | `FRONTEND_URL` | SSO Frontend URL（CORS 永遠允許） |
+| Auth | `SESSION_SECRET` / `JWT_SECRET` | 隨機產生的強密鑰 |
+| Azure AD | `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID` | Azure Portal 取得 |
+| Cookie | `COOKIE_DOMAIN` | 共用 cookie domain |
+| DB | `PG_*` | PostgreSQL 連線設定 |
+| Cache | `REDIS_*` | Redis 連線設定 |
 
 ### 白名單 (sso_allowed_list)
 
