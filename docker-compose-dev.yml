@@ -1,0 +1,101 @@
+services:
+  # ============================================
+  # PostgreSQL
+  # ============================================
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - sso-postgres-data:/var/lib/postgresql/data
+      - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # ============================================
+  # Redis
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    expose:
+      - "6379"
+    volumes:
+      - sso-redis-data:/data
+
+  # ============================================
+  # SSO Backend (Express.js)
+  # ============================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "35890"
+    environment:
+      PORT: 35890
+      NODE_ENV: production
+      FRONTEND_URL: ${FRONTEND_URL}
+      SESSION_SECRET: ${SESSION_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID}
+      AZURE_REDIRECT_URI: ${AZURE_REDIRECT_URI}
+      ROPC_REDIRECT_URL: ${ROPC_REDIRECT_URL}
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_DATABASE: ${DB_NAME}
+      PG_USER: ${DB_USER}
+      PG_PASSWORD: ${DB_PASSWORD}
+      PG_SCHEMA: public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: ${REDIS_DB}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      ERP_API_LOGIN_URL: ${ERP_API_LOGIN_URL}
+      ERP_API_SEARCH_URL: ${ERP_API_SEARCH_URL}
+      ERP_API_ACCOUNT: ${ERP_API_ACCOUNT}
+      ERP_API_PASSWORD: ${ERP_API_PASSWORD}
+      SERVICE_URL_BACKEND_35890:
+
+  # ============================================
+  # SSO Frontend (Next.js)
+  # ============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_AUTH_PATH: ${NEXT_PUBLIC_AUTH_PATH}
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      SERVICE_URL_FRONTEND_3000:
+
+  # ============================================
+  # Adminer（資料庫管理工具）
+  # ============================================
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: dracula
+      SERVICE_URL_ADMINER_8080:
+
+volumes:
+  sso-postgres-data:
+    name: sso-dev-postgres-data
+  sso-redis-data:
+    name: sso-dev-redis-data
