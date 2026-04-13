@@ -79,6 +79,110 @@ NEXT_PUBLIC_APP_URL=https://warehouse.apps.zerozero.tw
 
 ---
 
+## 路由規範（SaaS Convention）
+
+DF-SSO 整合預設遵循通用 SaaS 路由慣例。**接入的 Client App 請務必對齊**,否則登入 / 登出 / session 過期的 redirect 會跑到不存在的頁面。
+
+| 路徑 | 用途 | 誰負責導向到這 |
+|------|------|---------------|
+| `/` | **登入頁**(未登入入口) | 登出後、`session_expired`、`exchange_failed` 等錯誤情境 |
+| `/dashboard` | **登入後首頁**(主要工作區) | OAuth callback 換 token 成功後 |
+
+### 行為約定
+
+- **`/` 必須是登入頁**:`/api/auth/callback` 在交換失敗時會 redirect 到 `/?error=...`;`/api/auth/logout` 會 redirect 到 `/?logged_out=1`;前端在 `/me` 收到 `no_token` 時應自動導向 SSO `/api/auth/sso/authorize`
+- **`/dashboard` 必須存在且需要驗證**:`/api/auth/callback` 換 token 成功會直接 redirect 到 `/dashboard`;該頁面應在 client 端呼叫 `/api/auth/me` 確認登入狀態,失敗則導回 `/`
+- **`/` 自動重導已登入者**:登入頁 mount 時應呼叫 `/api/auth/me`,若已登入直接 `router.push("/dashboard")`,避免使用者重複看到登入按鈕
+- **錯誤 query string**:`?error=no_code` / `?error=exchange_failed` / `?error=exchange_error` / `?error=session_expired` / `?logged_out=1` — 登入頁可選擇性顯示對應訊息
+
+### 為什麼登出後要回 `/?logged_out=1`(不是只回 `/`)
+
+DF-SSO 的核心特性是「**跨 App 免登入**」 — 只要 SSO 中央 session 還在,任何 Client App 進入登入頁都會被自動拉回 SSO 靜默拿一張新 token。這個行為在「使用者第一次訪問」是好的,但在「使用者剛點擊登出」時會變成**死循環**:
+
+```
+使用者按登出
+  → /api/auth/logout 清掉本地 cookie
+  → redirect 回 /
+  → 登入頁 useEffect 呼叫 /api/auth/me
+  → no_token (因為剛剛清掉了)
+  → 自動 window.location.href = SSO_URL  ← ❌ 死循環
+  → SSO 中央 session 還在(別的 App 沒登出)
+  → 靜默發 code → callback → 又登入回去 ← ❌ 等於沒登出
+```
+
+> 注意:**Client App 的 `/api/auth/logout` 只會清掉自己的 token cookie 並通知 SSO,但 SSO 中央 session 預設保留**(這樣使用者在別的 App 還是登入狀態)。除非使用者另外點 SSO Frontend 的「全域登出」,否則靜默拿 code 一定會成功,登出就被吃掉。
+
+`?logged_out=1` 就是用來打斷這個循環的旗標:
+
+| 進入 `/` 的情境 | URL | 期望行為 |
+|----------------|-----|---------|
+| 第一次訪問 / 跨 App 跳過來 | `/` | `no_token` → **自動導向 SSO**(享受免登入) |
+| Session 過期 | `/?error=session_expired` | 顯示按鈕,**不**自動導向(避免被持續登出又持續被拉回) |
+| 剛點完登出 | `/?logged_out=1` | 顯示「您已登出」,**不**自動導向 |
+| 交換失敗 / 其他錯誤 | `/?error=...` | 顯示錯誤,**不**自動導向 |
+
+登入頁元件的判斷邏輯(對應 [登入頁](#登入頁) 章節的 `LoginPage`):
+
+```tsx
+useEffect(() => {
+  fetch("/api/auth/me")
+    .then(async (res) => {
+      if (res.ok) { router.push("/dashboard"); return; }
+      const data = await res.json().catch(() => ({}));
+      // 三個情境都「停下來顯示按鈕」,不自動導向 SSO
+      if (data.error === "session_expired" || error || loggedOut) {
+        setChecking(false);
+      } else {
+        // 只有「乾淨的 no_token」才自動導向 → 享受跨 App 免登入
+        window.location.href = ssoUrl;
+      }
+    });
+}, [...]);
+```
+
+簡單記:**有 `?logged_out=1` 或 `?error=...` → 顯示按鈕等使用者主動點;什麼 query 都沒有 → 靜默自動登入**。
+
+### `?logged_out=1` 的「預期非 bug」行為:重整後仍可能進 dashboard
+
+整合後一定會遇到這個情境,**這是正確設計、不是 bug**,請寫進你們的 QA 測試備註:
+
+> **複現步驟**
+> 1. Tab1 點登出 → 進入 `/?logged_out=1`,登入頁正確顯示按鈕
+> 2. 在 **Tab2** 點登入按鈕走完 SSO 流程(或在另一個同公司 App 重新登入,只要 SSO 中央 session 重建)
+> 3. 回到 Tab1 按 F5 重新整理
+> 4. **觀察結果:Tab1 直接跳到 `/dashboard`,不再停留在登入頁**
+
+**為什麼是對的**:
+
+- Token cookie 是 **per-origin 共享**的。Tab2 callback 寫進 cookie 後,Tab1 同 origin 的 `fetch("/api/auth/me")` 會自動帶上這個新 cookie
+- 此時 SSO 回 200(使用者已是有效登入狀態)
+- 登入頁 `useEffect` 的判斷順序是 **`if (res.ok) → /dashboard`** 在前、`if (loggedOut) → 顯示按鈕` 在後 — 因為「使用者已經有有效 session 了還卡在登入頁」才是真正的 bug
+
+**`?logged_out=1` 的職責邊界**:
+
+| 它擋什麼 | 它不擋什麼 |
+|----------|------------|
+| ✅ 清完 cookie 後 `useEffect` 立刻又把使用者靜默拉回 SSO 的**瞬間死循環** | ❌ 使用者真的在別的 tab / 別的 App 重新登入後回來 |
+| ✅ 「我剛按了登出,別把我馬上拉回去」 | ❌ 「我永遠不想自動進 dashboard」 |
+
+也就是說,`?logged_out=1` 只是個**一次性的暫停旗標**,用來中斷「登出 → 清 cookie → no_token → 自動導 SSO → 中央 session 還在 → 又拿到 token → 又登入回去」這條秒回的循環。一旦使用者做了**任何**會建立新 token 的動作(在另一 tab 重新登入),原本停在 `?logged_out=1` 的頁面下次重新整理就**應該**看到他已登入,直接進 dashboard 才是合理 UX。
+
+如果你的測試人員回報「按了登出後,在別的地方登入,回來重整還是進 dashboard」,**請直接結案 as designed**,不要去改判斷順序把 `loggedOut` 拉到 `res.ok` 之前 — 那會讓重新整理永遠卡在登入頁,直到使用者手動清掉 URL query,反而是真正的 bug。
+
+> MockA([app/page.tsx](../DF-SSO-MockA/app/page.tsx))與 MockB 都是這個設計的 reference 實作,可直接對照。
+
+### 若你的專案已有不同的路由結構
+
+可以調整,但要把下列三處全部改成你的路徑,且 **三處必須一致**:
+
+1. `app/api/auth/callback/route.ts` — 成功後的 `NextResponse.redirect(new URL("/dashboard", APP_URL))`
+2. `app/api/auth/logout/route.ts` — 登出後的 `NextResponse.redirect(new URL("/?logged_out=1", APP_URL))`
+3. 登入頁元件 — `useEffect` 中 `router.push("/dashboard")` 與 `?error=` query 的處理
+
+> 強烈建議直接沿用 `/` + `/dashboard`,跨 App 行為一致,新接入的系統不用每次都重新對齊路由。
+
+---
+
 ## 建立檔案
 
 你的專案需要 **1 個工具檔 + 4 個 API Route**。

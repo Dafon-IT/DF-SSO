@@ -34,6 +34,7 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 - **每個 SSO 環境（Prod / Test / Dev）各自有獨立的 Dashboard 和獨立的白名單 DB**，所以同一個 Client App（例如「倉儲系統」）需在每個環境的 Dashboard 各建立一筆，各拿一組 credentials
 - 一個 App 可註冊多個 **`redirect_uris`**（同一組 credentials 可對應多個 origin，最多 10 筆）
 - SSO 是唯一的 session 管理平台，Client App 每次都向 SSO `/api/auth/me` 即時驗證
+- **路由規範（SaaS convention）**：所有接入的 Client App 預設以 **`/`** 為登入頁、**`/dashboard`** 為登入後首頁。OAuth callback 成功 → `/dashboard`；登出 / `session_expired` / 錯誤 → `/?error=...` 或 `/?logged_out=1`。詳見 [INTEGRATION.md](INTEGRATION.md#路由規範saas-convention)
 
 ---
 
