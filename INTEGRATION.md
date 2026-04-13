@@ -2,7 +2,15 @@
 
 本文件說明企業內部專案如何串接 DF-SSO 單一登入系統。
 
-> **部署狀態：** SSO 中央目前僅提供 Test 環境（`https://df-sso-login-test.apps.zerozero.tw`）。Client App 接入時先在本機 + Test 兩組 origin 完成整合，未來 prod 上線再把 prod origin 加入 `redirect_uris` 即可，`app_id` / `app_secret` 不變。
+> **SSO 中央線上環境：**
+>
+> | 環境 | Backend URL（給 Client App 呼叫） | Management Dashboard |
+> |------|----------------------------------|---------------------|
+> | **Prod** | `https://df-sso-login.apps.zerozero.tw` | `https://df-sso-management.apps.zerozero.tw` |
+> | **Test** | `https://df-sso-login-test.apps.zerozero.tw` | `https://df-sso-management-test.apps.zerozero.tw` |
+> | **Dev**  | `http://localhost:3001` | `http://localhost:3000` |
+>
+> 同一個 App 的 `app_id` / `app_secret` **跨環境共用**，只要把對應環境的 origin 加進 `redirect_uris` 即可（每 App 最多 10 筆）。
 
 ---
 
@@ -25,32 +33,38 @@
 
 在 Dashboard 點擊「**顯示金鑰**」即可複製完整的 `app_id` + `app_secret`。
 
-### 2. SSO Backend URL
+### 2. 選擇要接入的 SSO 環境
 
-| 環境 | URL | 狀態 |
+| 環境 | URL | 用途 |
 |------|-----|------|
-| 本機 | `http://localhost:3001` | 開發用 |
-| Test | `https://df-sso-login-test.apps.zerozero.tw` | **目前唯一線上環境** |
-| Prod | (未決定) | 尚未部署 |
+| **Prod** | `https://df-sso-login.apps.zerozero.tw` | 正式服務 |
+| **Test** | `https://df-sso-login-test.apps.zerozero.tw` | 測試整合 / Staging |
+| **Dev**  | `http://localhost:3001` | 本機開發 |
+
+同一個 Client App 可以把不同環境的 `SSO_URL` 指向不同 SSO 中央（例如 Client App 的 prod 版接 SSO Prod、staging 版接 SSO Test）。
 
 ---
 
 ## 設定環境變數
 
+以接入 **Prod** 為例：
+
 ```env
 # Server-side（runtime，保密）
-SSO_URL=https://df-sso-login-test.apps.zerozero.tw
+SSO_URL=https://df-sso-login.apps.zerozero.tw
 SSO_APP_ID=<app_id>
 SSO_APP_SECRET=<app_secret>
 APP_URL=https://warehouse.apps.zerozero.tw
 
 # Client-side（build time，公開）
-NEXT_PUBLIC_SSO_URL=https://df-sso-login-test.apps.zerozero.tw
+NEXT_PUBLIC_SSO_URL=https://df-sso-login.apps.zerozero.tw
 NEXT_PUBLIC_SSO_APP_ID=<同 SSO_APP_ID>
 NEXT_PUBLIC_APP_URL=https://warehouse.apps.zerozero.tw
 ```
 
-> `app_id` + `app_secret` **跨環境共用**（本機 / Test / 未來 prod 同一組），只需改 `APP_URL`。
+接 **Test** 只需把所有 `df-sso-login.apps.zerozero.tw` 改成 `df-sso-login-test.apps.zerozero.tw`，其餘不變。
+
+> `app_id` + `app_secret` **跨環境共用**（本機 / Test / Prod 同一組），只需改 `SSO_URL` + `APP_URL`。
 > `APP_URL` 的 origin 必須在白名單的 `redirect_uris` 中（每 App 最多 10 筆）。
 
 ---

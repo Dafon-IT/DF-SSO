@@ -1,7 +1,12 @@
 # DF-SSO 系統設計文件
 
-> **部署狀態：** 本系統目前僅部署於 **Test 環境**（`*-test.apps.zerozero.tw`）。
-> 正式環境（prod）尚未上線，本文件中若出現「prod」通常指「未來 prod」或 `docker-compose-prod.yml` 這個尚未啟用的設定檔。
+> **部署狀態：** Prod 與 Test 環境皆已上線。
+>
+> | 環境 | Frontend | Backend | Compose | Migrations |
+> |------|----------|---------|---------|------------|
+> | **Prod** | `https://df-sso-management.apps.zerozero.tw` | `https://df-sso-login.apps.zerozero.tw` | `docker-compose-prod.yml` | `backend/migrations/prod/` |
+> | **Test** | `https://df-sso-management-test.apps.zerozero.tw` | `https://df-sso-login-test.apps.zerozero.tw` | `docker-compose-test.yml` | `backend/migrations/dev/` |
+> | **Dev** | `http://localhost:3000` | `http://localhost:3001` | `docker-compose-dev.yml` | `backend/migrations/dev/` |
 
 ## 目標
 
@@ -10,7 +15,7 @@
 1. 各子專案透過 **OAuth2 Client Credentials**（`app_id` + `app_secret`）接入 SSO 中央
 2. 登入 App-A → App-B **自動登入**（中央 session 共享）
 3. 登出 App-A → SSO **刪除中央 session** + **back-channel 通知所有 App**
-4. 每個 App 可註冊多個 **`redirect_uris`**（本機 / test，日後加 prod 時沿用同一組 credentials）
+4. 每個 App 可註冊多個 **`redirect_uris`**（本機 / Test / Prod 共用同一組 credentials）
 5. 子專案整合只需 **5 個檔案 + 4 個環境變數**
 
 ---
@@ -262,16 +267,20 @@ App-A 點登出 → /api/auth/logout
 | ERP 查詢失敗 | 不中斷登入，`status = erp_not_found`，`erpData` 為 `null` |
 | Microsoft token exchange 失敗 | 寫入 `sso_login_log` `status = failed` + `errorMessage`，redirect `?error=token_exchange_failed` |
 
-### 部署環境限制（目前狀態）
+### 部署環境（目前狀態）
 
-| 項目 | 狀態 |
-|------|------|
-| 部署環境 | **僅 Test**（`*-test.apps.zerozero.tw`） |
-| Prod 環境 | **未部署**，`docker-compose-prod.yml` 為樣板 |
-| Client App MockA / MockB 本機 port | 3100 / 3200 |
+| 環境 | 狀態 | Frontend URL | Backend URL |
+|------|------|--------------|-------------|
+| **Prod** | ✅ 線上 | `https://df-sso-management.apps.zerozero.tw` | `https://df-sso-login.apps.zerozero.tw` |
+| **Test** | ✅ 線上 | `https://df-sso-management-test.apps.zerozero.tw` | `https://df-sso-login-test.apps.zerozero.tw` |
+| **Dev** | 本機 | `http://localhost:3000` | `http://localhost:3001` |
+
+| Port 與 Service | 值 |
+|-----------------|----|
 | SSO Frontend 本機 port | 3000 |
 | SSO Backend 本機 port | 3001 |
-| SSO Backend Test 容器 port | 35890 |
+| SSO Backend 容器 port（Test / Prod） | 35890 |
+| Client App MockA / MockB 本機 port | 3100 / 3200 |
 
 ---
 
@@ -397,7 +406,7 @@ App-A 點登出 → /api/auth/logout
 | 變數 | 說明 |
 |------|------|
 | `PORT` | 後端 Port（預設 3001） |
-| `NODE_ENV` | 目前僅使用 `development`（本機）與 `test`（Test 容器），`production` 保留給未來 |
+| `NODE_ENV` | `development`（本機）/ `test`（Test 容器）/ `production`（Prod 容器） |
 | `FRONTEND_URL` | SSO Frontend URL（CORS 永遠允許，預設 `http://localhost:3000`） |
 | ✱ `SESSION_SECRET` | Express Session 密鑰 |
 | ✱ `JWT_SECRET` | JWT 簽名密鑰 |
@@ -439,7 +448,7 @@ App-A 點登出 → /api/auth/logout
 | Session / 快取 | Redis 7 (ioredis + `connect-redis`) |
 | Token | JWT HS256（預設 24h） |
 | API 文件 | Swagger（`swagger-jsdoc` + `swagger-ui-express`） |
-| 部署 | Coolify + Docker Compose（目前使用 `docker-compose-test.yml`；`-dev` / `-prod` 為本機開發與未來正式環境用的樣板，尚未啟用） |
+| 部署 | Coolify + Docker Compose（Prod 與 Test 兩套獨立 stack；`docker-compose-dev.yml` 為本機開發樣板） |
 
 ---
 
@@ -466,12 +475,12 @@ DF-SSO/
 ├── docs/Design.md             # 本文件
 ├── INTEGRATION.md             # Client App 整合指引
 ├── README.md
-├── docker-compose-dev.yml      # 本機開發樣板（未啟用）
-├── docker-compose-test.yml     # ★ 目前 Test 環境實際部署用
-└── docker-compose-prod.yml     # 未來正式環境樣板（未啟用）
+├── docker-compose-dev.yml      # 本機開發樣板
+├── docker-compose-test.yml     # ★ Coolify Test 環境部署
+└── docker-compose-prod.yml     # ★ Coolify Prod 環境部署
 ```
 
-> 目前所有 `*-test.apps.zerozero.tw` URL 皆屬於 Test 環境。Prod 預期使用 `df-sso-management.apps.zerozero.tw` / `df-sso-login.apps.zerozero.tw`（已寫入 `migrations/prod` seed）。
+> Prod 與 Test 為**兩套獨立** Coolify stack，各自的 Postgres / Redis volume 也完全隔離（`sso-prod-*` vs `sso-test-*`）。
 
 ---
 

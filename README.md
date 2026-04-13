@@ -2,7 +2,12 @@
 
 大豐環保 SSO 單一登入系統。所有子專案共用一組 Microsoft 帳號認證，登入一次即可跨系統使用。
 
-> **部署狀態：** 目前僅部署於 **Test 環境**（`*-test.apps.zerozero.tw`）。正式環境（prod）尚未啟用。
+> **線上環境：**
+>
+> | 環境 | Frontend (管理後台) | Backend (OAuth2 Server) |
+> |------|-------------------|------------------------|
+> | **Prod** | https://df-sso-management.apps.zerozero.tw | https://df-sso-login.apps.zerozero.tw |
+> | **Test** | https://df-sso-management-test.apps.zerozero.tw | https://df-sso-login-test.apps.zerozero.tw |
 
 ---
 
@@ -26,8 +31,8 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 ### 核心原則
 
 - 每個 Client App 由 SSO 中央發放 **`app_id`** + **`app_secret`**（OAuth2 Client Credentials）
-- `app_id` + `app_secret` 跨環境共用（目前僅本機 + Test，未來加 prod 亦沿用同一組），只需改 `APP_URL`
-- 一個 App 可註冊多個 **`redirect_uris`**（本機 / Test 各自的 origin，最多 10 筆）
+- `app_id` + `app_secret` 跨環境共用（本機 / Test / Prod 同一組），只需改 `APP_URL`
+- 一個 App 可註冊多個 **`redirect_uris`**（本機 / Test / Prod 各自的 origin，最多 10 筆）
 - SSO 是唯一的 session 管理平台，Client App 每次都向 SSO `/api/auth/me` 即時驗證
 
 ---
@@ -77,20 +82,27 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 
 ---
 
-## Coolify Test 環境部署
+## Coolify 部署
 
-目前使用 [docker-compose-test.yml](docker-compose-test.yml) 在 Coolify 部署 Test 環境。`docker-compose-dev.yml` / `docker-compose-prod.yml` 為本機開發與未來正式環境的樣板，**尚未啟用**。
+Coolify 上同時部署 **Prod** 與 **Test** 兩套獨立 stack，各自的 Postgres / Redis volume 完全隔離（`sso-prod-*` vs `sso-test-*`）。
 
-### SSO Backend 環境變數（Test）
+| 環境 | Compose 檔 | Migration 目錄 | `NODE_ENV` |
+|------|-----------|---------------|-----------|
+| **Prod** | [docker-compose-prod.yml](docker-compose-prod.yml) | `backend/migrations/prod/` | `production` |
+| **Test** | [docker-compose-test.yml](docker-compose-test.yml) | `backend/migrations/dev/` | `test` |
+| **Dev** | [docker-compose-dev.yml](docker-compose-dev.yml) | `backend/migrations/dev/` | `production`（或自訂） |
+
+### SSO Backend 環境變數（Prod / Test 通用）
 
 | 類別 | 變數 | 說明 |
 |------|------|------|
-| Server | `NODE_ENV` | `test`（Test 容器）；本機開發用 `development` |
+| Server | `NODE_ENV` | `production`（Prod）/ `test`（Test）/ `development`（本機） |
 | Server | `FRONTEND_URL` | SSO Frontend URL（CORS 永遠允許） |
+| Server | `MIGRATIONS_DIR` | `prod`（Prod baseline）/ `dev`（完整歷史） |
 | Auth | `SESSION_SECRET` / `JWT_SECRET` | 隨機產生的強密鑰 |
 | Azure AD | `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID` | Azure Portal 取得 |
 | Azure AD | `AZURE_REDIRECT_URI` | Microsoft callback URL（`authPathSegment` 會自動解析） |
-| Cookie | `COOKIE_DOMAIN` | 共用 cookie domain（Test：`.apps.zerozero.tw`） |
+| Cookie | `COOKIE_DOMAIN` | 共用 cookie domain（預設 `.apps.zerozero.tw`） |
 | DB | `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | PostgreSQL 必填 |
 | Cache | `REDIS_HOST` / `REDIS_PORT` / `REDIS_DB` | Redis（有預設值） |
 
@@ -98,20 +110,16 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 
 ### 白名單 (sso_allowed_list)
 
-建立 App 時 SSO 自動產生 `app_id` + `app_secret`，管理員設定 `redirect_uris`（最多 10 筆）：
+建立 App 時 SSO 自動產生 `app_id` + `app_secret`，管理員設定 `redirect_uris`（每 App 最多 10 筆）。**同一組 credentials 跨 Prod / Test / 本機共用**，只要把對應環境的 origin 加進 `redirect_uris` 即可。
 
-| name | domain | redirect_uris | app_id | app_secret |
-|------|--------|---------------|--------|------------|
-| SSO Management | `https://df-sso-management-test.apps.zerozero.tw` | `[本機, Test]` | (auto UUID) | (auto 64 hex) |
-| App A | `https://df-sso-mock-test-app-a.apps.zerozero.tw` | `[http://localhost:3100, https://df-sso-mock-test-app-a.apps.zerozero.tw]` | (auto) | (auto) |
-| App B | `https://df-sso-mock-test-app-b.apps.zerozero.tw` | `[http://localhost:3200, https://df-sso-mock-test-app-b.apps.zerozero.tw]` | (auto) | (auto) |
+Prod baseline seed 只會灌入 `SSO Management` 自身（`https://df-sso-management.apps.zerozero.tw`）— 其他 Client App 由管理員登入 Dashboard 後手動新增。
 
-### Test 驗證步驟
+### 驗證步驟
 
-1. `GET /api/health` → `{ status: "ok", pg: "connected", redis: "connected" }`
-2. 從 MockA 登入 → Microsoft → MockA Dashboard
-3. 訪問 MockB → 自動登入（不跳 Microsoft）
-4. MockA 登出 → Redis session 刪除 → MockB 下次操作回 401
+1. `GET <Backend URL>/api/health` → `{ status: "ok", pg: "connected", redis: "connected" }`
+2. 從 Client App 登入 → Microsoft → Client App Dashboard
+3. 訪問另一個 Client App → 自動登入（不跳 Microsoft）
+4. 任一 App 登出 → Redis session 刪除 → 其他 App 下次 `/me` 回 401
 5. 連續重整頁面 → 不應出現 rate limit 錯誤
 
 ---
@@ -120,14 +128,14 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 
 ```
 DF-SSO/
-├── backend/                    # SSO 中央伺服器（Express；本機 3001 / Test 容器 35890）
+├── backend/                    # SSO 中央伺服器（Express；本機 3001 / 容器 35890）
 ├── frontend/                   # SSO 管理後台（Next.js，本機 port 3000）
 ├── microsoft-ad-login/         # Claude skill：協助 Client App 接入
 ├── docs/Design.md              # 系統設計與限制一覽
 ├── INTEGRATION.md              # Client App 整合指引
-├── docker-compose-dev.yml      # 本機開發樣板（未啟用）
-├── docker-compose-test.yml     # ★ 目前 Test 環境部署用
-└── docker-compose-prod.yml     # 未來正式環境樣板（未啟用）
+├── docker-compose-dev.yml      # 本機開發樣板
+├── docker-compose-test.yml     # ★ Coolify Test 環境部署
+└── docker-compose-prod.yml     # ★ Coolify Prod 環境部署
 ```
 
 ## 技術棧
