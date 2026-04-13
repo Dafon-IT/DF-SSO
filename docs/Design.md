@@ -435,7 +435,7 @@ App-A 點登出 → /api/auth/logout
 | SSO Backend | Node.js + Express.js |
 | 安全 | Helmet + express-rate-limit + CORS 動態白名單 + HMAC-SHA256 + timingSafeEqual |
 | 認證 | Microsoft Azure AD (OAuth 2.0 + `@azure/msal-node`) |
-| 資料庫 | PostgreSQL 16（`node-pg-migrate` 管理 schema） |
+| 資料庫 | PostgreSQL 16（`node-pg-migrate`，dev/prod 雙目錄，見下） |
 | Session / 快取 | Redis 7 (ioredis + `connect-redis`) |
 | Token | JWT HS256（預設 24h） |
 | API 文件 | Swagger（`swagger-jsdoc` + `swagger-ui-express`） |
@@ -453,8 +453,10 @@ DF-SSO/
 │   ├── middleware/adminAuth.js# JWT + Redis session + admin 白名單
 │   ├── routes/                # auth / sso / allowedList / loginLog / adminManager
 │   ├── services/              # allowedList / loginLog / adminManager / erpApi
-│   ├── migrations/            # node-pg-migrate（10 筆 schema / seed / fix）
-│   └── sql/                   # 參考用 SQL
+│   ├── migrations/
+│   │   ├── dev/               # Test / 本機 dev（歷史 10 筆 schema / seed / fix）
+│   │   └── prod/              # Prod 乾淨 baseline（3 筆：init-schema + admin seed + allowed_list seed）
+│   └── sql/init.sql           # postgres 容器 bootstrap（只啟用 pgcrypto，schema 交給 migration）
 ├── frontend/                  # Next.js 管理後台
 │   └── src/app/
 │       ├── page.tsx           # 登入首頁
@@ -469,4 +471,61 @@ DF-SSO/
 └── docker-compose-prod.yml     # 未來正式環境樣板（未啟用）
 ```
 
-> 目前所有 `*-test.apps.zerozero.tw` URL 皆屬於 Test 環境。正式環境（prod）的 domain、URL、Redis DB、Cookie domain 都尚未決定。
+> 目前所有 `*-test.apps.zerozero.tw` URL 皆屬於 Test 環境。Prod 預期使用 `df-sso-management.apps.zerozero.tw` / `df-sso-login.apps.zerozero.tw`（已寫入 `migrations/prod` seed）。
+
+---
+
+## Migration 管理
+
+### 雙目錄策略
+
+| 目錄 | 用途 | 使用者 |
+|------|------|--------|
+| [backend/migrations/dev/](../backend/migrations/dev/) | 本機開發與 Test 環境，**保留完整歷史**（10 筆）供除錯追蹤 | `docker-compose-dev.yml` / `docker-compose-test.yml` |
+| [backend/migrations/prod/](../backend/migrations/prod/) | 正式環境，**乾淨 baseline**（3 筆）確保首次部署無歷史包袱 | `docker-compose-prod.yml` |
+
+### 選擇機制
+
+Backend 容器啟動時會依 `MIGRATIONS_DIR` 環境變數挑資料夾：
+
+```sh
+# backend/Dockerfile CMD
+npx node-pg-migrate -m migrations/${MIGRATIONS_DIR:-dev} up && node server.js
+```
+
+| Compose 檔 | `MIGRATIONS_DIR` | 實際跑的 migration |
+|------------|-----------------|-------------------|
+| `docker-compose-dev.yml` | `dev` | `backend/migrations/dev/` |
+| `docker-compose-test.yml` | `dev` | `backend/migrations/dev/` |
+| `docker-compose-prod.yml` | `prod` | `backend/migrations/prod/` |
+
+### NPM Scripts
+
+本機手動操作時，請用對應環境的 script（不能再用舊的 `migrate:up`）：
+
+```bash
+# Dev / Test
+npm run migrate:up:dev
+npm run migrate:down:dev
+npm run migrate:create:dev <name>
+
+# Prod
+npm run migrate:up:prod
+npm run migrate:down:prod
+npm run migrate:create:prod <name>
+```
+
+### Prod baseline（`migrations/prod/`）
+
+| 檔案 | 作用 |
+|------|------|
+| `1744200000000_init-schema.js` | 建立 `pgcrypto` + `uuidv7()` + `update_updated_at()` + 三張表（`sso_login_log` / `sso_allowed_list` / `sso_admin_manager`），timestamp 一律 `TIMESTAMPTZ + NOW()`，`sso_allowed_list` 內建 `app_id` / `app_secret` / `redirect_uris` 欄位 |
+| `1744200100000_seed-default-admin.js` | 灌入預設管理員 `jiaye.he@df-recycle.com`（azure_oid `c5e1e537-…`）以便首次登入後台 |
+| `1744200200000_seed-allowed-list.js` | 灌入 SSO Management 自身白名單（`https://df-sso-management.apps.zerozero.tw`）；其他 Client App 由 Dashboard 新增 |
+
+### 寫新 Migration 原則
+
+1. **Schema 變更** — Dev 與 Prod **兩邊都要加**；Dev 加到尾端，Prod 也加到尾端。未來兩邊的「init-schema」會逐漸分歧是可以接受的（Dev 留歷史、Prod 每隔一段時間可以 squash）
+2. **Seed 變更** — 視目標環境只改對應資料夾
+3. **down 絕不刪除 management domain 白名單資料** — 避免回滾毀掉管理後台自身的登入能力
+4. **Seed 必須 idempotent** — 一律 `ON CONFLICT DO NOTHING`

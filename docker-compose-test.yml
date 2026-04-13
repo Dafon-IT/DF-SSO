@@ -39,6 +39,7 @@ services:
     environment:
       PORT: 35890
       NODE_ENV: test
+      MIGRATIONS_DIR: dev
       FRONTEND_URL: ${FRONTEND_URL}
       SESSION_SECRET: ${SESSION_SECRET}
       JWT_SECRET: ${JWT_SECRET}

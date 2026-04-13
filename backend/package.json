@@ -6,9 +6,12 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "migrate:up": "node-pg-migrate up",
-    "migrate:down": "node-pg-migrate down",
-    "migrate:create": "node-pg-migrate create"
+    "migrate:up:dev": "node-pg-migrate -m migrations/dev up",
+    "migrate:down:dev": "node-pg-migrate -m migrations/dev down",
+    "migrate:create:dev": "node-pg-migrate -m migrations/dev create",
+    "migrate:up:prod": "node-pg-migrate -m migrations/prod up",
+    "migrate:down:prod": "node-pg-migrate -m migrations/prod down",
+    "migrate:create:prod": "node-pg-migrate -m migrations/prod create"
   },
   "dependencies": {
     "@azure/msal-node": "^2.16.2",
