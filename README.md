@@ -31,8 +31,8 @@ Client App（MockA / MockB / ...）       SSO 中央（本專案）            M
 ### 核心原則
 
 - 每個 Client App 由 SSO 中央發放 **`app_id`** + **`app_secret`**（OAuth2 Client Credentials）
-- `app_id` + `app_secret` 跨環境共用（本機 / Test / Prod 同一組），只需改 `APP_URL`
-- 一個 App 可註冊多個 **`redirect_uris`**（本機 / Test / Prod 各自的 origin，最多 10 筆）
+- **每個 SSO 環境（Prod / Test / Dev）各自有獨立的 Dashboard 和獨立的白名單 DB**，所以同一個 Client App（例如「倉儲系統」）需在每個環境的 Dashboard 各建立一筆，各拿一組 credentials
+- 一個 App 可註冊多個 **`redirect_uris`**（同一組 credentials 可對應多個 origin，最多 10 筆）
 - SSO 是唯一的 session 管理平台，Client App 每次都向 SSO `/api/auth/me` 即時驗證
 
 ---
@@ -110,7 +110,12 @@ Coolify 上同時部署 **Prod** 與 **Test** 兩套獨立 stack，各自的 Pos
 
 ### 白名單 (sso_allowed_list)
 
-建立 App 時 SSO 自動產生 `app_id` + `app_secret`，管理員設定 `redirect_uris`（每 App 最多 10 筆）。**同一組 credentials 跨 Prod / Test / 本機共用**，只要把對應環境的 origin 加進 `redirect_uris` 即可。
+建立 App 時 SSO 自動產生 `app_id` + `app_secret`，管理員設定 `redirect_uris`（每 App 最多 10 筆）。
+
+**每個 SSO 環境各自獨立**：
+- Prod / Test / Dev 各有獨立的 Postgres，`sso_allowed_list` 資料完全隔離
+- 同一個 Client App（例如「倉儲系統」）若要同時接入 Prod 與 Test 的 SSO，需到兩個環境的 Dashboard **各建立一筆**，各自持有一組 credentials
+- `redirect_uris` 是 **同一組 credentials 可對應多個 origin**（例如 prod 那筆可以同時列 prod 正式 origin + 本機 origin 以便開發者用 prod credentials 在本機除錯）
 
 Prod baseline seed 只會灌入 `SSO Management` 自身（`https://df-sso-management.apps.zerozero.tw`）— 其他 Client App 由管理員登入 Dashboard 後手動新增。
 

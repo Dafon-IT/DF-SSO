@@ -10,22 +10,32 @@
 > | **Test** | `https://df-sso-login-test.apps.zerozero.tw` | `https://df-sso-management-test.apps.zerozero.tw` |
 > | **Dev**  | `http://localhost:3001` | `http://localhost:3000` |
 >
-> 同一個 App 的 `app_id` / `app_secret` **跨環境共用**，只要把對應環境的 origin 加進 `redirect_uris` 即可（每 App 最多 10 筆）。
+> **每個 SSO 環境的 credentials 都是獨立的**：同一個 Client App（例如「倉儲系統」）若要同時接 Prod 與 Test，必須分別到 Prod Dashboard 與 Test Dashboard 各建立一筆，各拿一組不同的 `app_id` + `app_secret`。
+>
+> 「跨環境」意思只在於：同一組 credentials 的 `redirect_uris` 可列多個 origin（例如 prod credentials 的 `redirect_uris` 同時列 `https://warehouse.apps.zerozero.tw` 和 `http://localhost:3100` 讓開發者可以用 prod credentials 在本機除錯）。
 
 ---
 
 ## 前置作業
 
-### 1. 向 SSO 管理員申請 App
+### 1. 向 SSO 管理員申請 App（**每個環境分別申請**）
 
-到 SSO Dashboard 的**應用程式管理**新增你的專案：
+每個 SSO 環境的白名單是**獨立的** Postgres，credentials 不互通。要接哪個環境就到那個環境的 Dashboard 新增：
 
-| 欄位 | 說明 | 範例 |
-|------|------|------|
+- Prod → `https://df-sso-management.apps.zerozero.tw`
+- Test → `https://df-sso-management-test.apps.zerozero.tw`
+- Dev  → `http://localhost:3000`（本機 Dashboard）
+
+同一個 Client App 若要同時接多個環境，請在每個環境的 Dashboard **各建一筆**，各拿一組不同的 `app_id` / `app_secret`。
+
+新增表單欄位：
+
+| 欄位 | 說明 | 範例（Prod） |
+|------|------|-------------|
 | **網域** | 主要 domain（含 `https://`） | `https://warehouse.apps.zerozero.tw` |
 | **系統名稱** | 顯示名稱 | `倉儲系統` |
 | **說明** | 用途描述 | `大豐倉儲管理系統` |
-| **Redirect URIs** | 所有環境的 origin | `http://localhost:3100`、`https://warehouse.apps.zerozero.tw` |
+| **Redirect URIs** | 使用**該組 credentials** 的所有 origin（最多 10 筆） | `https://warehouse.apps.zerozero.tw`、`http://localhost:3100` |
 
 建立後 SSO 自動產生：
 - **`app_id`** — UUID，公開的 client identifier
@@ -62,10 +72,10 @@ NEXT_PUBLIC_SSO_APP_ID=<同 SSO_APP_ID>
 NEXT_PUBLIC_APP_URL=https://warehouse.apps.zerozero.tw
 ```
 
-接 **Test** 只需把所有 `df-sso-login.apps.zerozero.tw` 改成 `df-sso-login-test.apps.zerozero.tw`，其餘不變。
+接 **Test** 時把 `SSO_URL` / `NEXT_PUBLIC_SSO_URL` 改成 `https://df-sso-login-test.apps.zerozero.tw`，並**從 Test Dashboard 拿另一組** `SSO_APP_ID` / `SSO_APP_SECRET`（不是 prod 那組）。
 
-> `app_id` + `app_secret` **跨環境共用**（本機 / Test / Prod 同一組），只需改 `SSO_URL` + `APP_URL`。
-> `APP_URL` 的 origin 必須在白名單的 `redirect_uris` 中（每 App 最多 10 筆）。
+> `SSO_APP_ID` + `SSO_APP_SECRET` **依環境獨立**：從哪個 SSO 環境的 Dashboard 取得，就只能用在那個環境。
+> `APP_URL` 的 origin 必須在白名單該筆的 `redirect_uris` 中（每筆最多 10 筆）。
 
 ---
 

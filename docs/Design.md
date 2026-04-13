@@ -15,7 +15,7 @@
 1. 各子專案透過 **OAuth2 Client Credentials**（`app_id` + `app_secret`）接入 SSO 中央
 2. 登入 App-A → App-B **自動登入**（中央 session 共享）
 3. 登出 App-A → SSO **刪除中央 session** + **back-channel 通知所有 App**
-4. 每個 App 可註冊多個 **`redirect_uris`**（本機 / Test / Prod 共用同一組 credentials）
+4. 每個 App 可註冊多個 **`redirect_uris`**（同一組 credentials 可橫跨多個 origin，例如 dev + prod）
 5. 子專案整合只需 **5 個檔案 + 4 個環境變數**
 
 ---
