@@ -1,5 +1,8 @@
 # DF-SSO 系統設計文件
 
+> **部署狀態：** 本系統目前僅部署於 **Test 環境**（`*-test.apps.zerozero.tw`）。
+> 正式環境（prod）尚未上線，本文件中若出現「prod」通常指「未來 prod」或 `docker-compose-prod.yml` 這個尚未啟用的設定檔。
+
 ## 目標
 
 建立企業統一 SSO（Single Sign-On）單一登入系統：
@@ -7,7 +10,7 @@
 1. 各子專案透過 **OAuth2 Client Credentials**（`app_id` + `app_secret`）接入 SSO 中央
 2. 登入 App-A → App-B **自動登入**（中央 session 共享）
 3. 登出 App-A → SSO **刪除中央 session** + **back-channel 通知所有 App**
-4. 每個 App 可註冊多個 **`redirect_uris`**（dev / test / prod 共用同一組 credentials）
+4. 每個 App 可註冊多個 **`redirect_uris`**（本機 / test，日後加 prod 時沿用同一組 credentials）
 5. 子專案整合只需 **5 個檔案 + 4 個環境變數**
 
 ---
@@ -25,17 +28,19 @@
 │  (Next.js)   │ │(Next.js) │ │(Next.js) │
 │  Port 3000   │ │Port 3100 │ │Port 3200 │
 │              │ │          │ │          │
-│ ‧管理後台    │ │ ‧本地 token│ │ ‧本地 token│
-│ ‧應用程式管理 │ │  cookie   │ │  cookie   │
-│ ‧登入紀錄    │ │ ‧API routes│ │ ‧API routes│
-│ ‧管理員管理  │ └────┬─────┘ └────┬─────┘
-└──────┬───────┘      │            │
+│ 單頁 Dashboard │ │本地 token │ │本地 token │
+│ (Tab 切換) :   │ │ cookie    │ │ cookie    │
+│ ‧應用程式管理 │ │API routes │ │API routes │
+│ ‧登入紀錄    │ │(callback, │ │(callback, │
+│ ‧管理員管理  │ │ me, logout)│ │ me, logout)│
+└──────┬───────┘ └────┬─────┘ └────┬─────┘
+       │              │            │
        │    ┌─────────┴────────────┘
        │    │  server-to-server
        ▼    ▼  (code exchange + client credentials / Bearer token)
 ┌──────────────────────────────────┐
 │    SSO Backend (Express.js)      │
-│    Port 35890                    │
+│    本機 3001 / Test 容器 35890   │
 │                                  │
 │  OAuth2 Authorization Server：   │
 │  ‧app_id + app_secret 管理      │
@@ -50,14 +55,15 @@
 │  ‧CORS 動態白名單 (redirect_uris)│
 │  ‧重導向白名單驗證               │
 │  ‧Session fixation 防護          │
+│  ‧adminAuth 中間件 (後台 API)    │
 │  ‧環境變數啟動驗證               │
 │  ‧Graceful Shutdown              │
 └────┬────────┬─────────┬──────────┘
      │        │         │
 ┌────▼───┐ ┌──▼─────┐ ┌─▼──────────┐
 │Microsoft│ │Postgre │ │   Redis    │
-│Azure AD │ │  SQL   │ │  (DB 15)   │
-│(OAuth)  │ │DB:SSO-v1│ │            │
+│Azure AD │ │  SQL   │ │ (ioredis)  │
+│(OAuth)  │ │  16    │ │     7      │
 └─────────┘ └────────┘ └────────────┘
                 │
           ┌─────▼──────┐
@@ -166,10 +172,14 @@ App-A 點登出 → /api/auth/logout
 | **Session fixation 防護** | 登入成功後 `req.session.regenerate()` 重新產生 session ID |
 | **Redirect 白名單** | authorize 的 `redirect_uri` 和 logout 的 `redirect` 都驗證 `redirect_uris[]` |
 | **Protocol 限制** | logout redirect 只允許 `http:` / `https:` 協定，防 `javascript:` 注入 |
+| **Logout Origin 剝離** | 驗證通過後只保留 `URL.origin`，剝除 path/query/fragment 防注入 |
 | **Secret 遮蔽** | API 列表只回傳 `app_secret_last4`，完整 secret 需管理員呼叫 `/credentials` |
+| **adminAuth 中間件** | `/api/allowed-list`、`/api/login-log`、`/api/admin-manager` 須驗證 JWT + Redis Session + 管理員白名單 |
+| **Self-delete 防護** | `DELETE /api/admin-manager/:uid` 禁止管理員刪除自己 |
 | **Helmet** | X-Content-Type-Options、X-Frame-Options、HSTS 等安全 headers |
 | **Rate Limiting** | 分層限制（見下表） |
-| **Body Size Limit** | `express.json()` 限制 1MB |
+| **Body Size Limit** | `express.json()` / `urlencoded()` 限制 1MB |
+| **trust proxy** | `app.set('trust proxy', 1)` 讓 rate limiter 從 `X-Forwarded-For` 正確取 IP |
 | **Graceful Shutdown** | SIGTERM/SIGINT → 停止接受新連線 → 等待完成 → 關閉 DB/Redis |
 
 ### Rate Limiting
@@ -180,6 +190,88 @@ App-A 點登出 → /api/auth/logout
 | Auth（login/redirect/authorize） | 30 / 15min | 防暴力登入 |
 | Session（/me、POST /logout） | 100 / 15min | Client App 高頻 server-to-server |
 | Exchange | 20 / 1min | 防 auth code 猜測 |
+
+---
+
+## 系統限制（Limits）一覽
+
+### 時效限制
+
+| 項目 | 值 | 位置 |
+|------|----|------|
+| 中央 session TTL | **24 小時**（Redis `sso:session:*`） | [backend/routes/auth.js](../backend/routes/auth.js) `SESSION_TTL` |
+| JWT 過期時間 | **24 小時**（`JWT_EXPIRES_IN` 可覆寫） | [backend/config/index.js](../backend/config/index.js) |
+| 一次性 Auth Code TTL | **60 秒**，Lua `GET+DEL` 原子消耗 | [backend/routes/sso.js](../backend/routes/sso.js) `AUTH_CODE_TTL` |
+| Express Session（OAuth state）TTL | **10 分鐘** | [backend/server.js](../backend/server.js) |
+| Back-channel HMAC timestamp 容忍 | **30 秒**（Client 端驗證） | [INTEGRATION.md](../INTEGRATION.md) 範本 |
+| Back-channel 對單一 App 的 fetch timeout | **5 秒**（`AbortSignal.timeout`） | [backend/routes/auth.js](../backend/routes/auth.js) / [sso.js](../backend/routes/sso.js) |
+| CORS origin 快取 TTL | **60 秒** | [backend/server.js](../backend/server.js) `CORS_CACHE_TTL` |
+| Graceful shutdown 強制關閉 | **10 秒**後 `process.exit(1)` | [backend/server.js](../backend/server.js) |
+
+### 格式與長度限制
+
+| 項目 | 限制 |
+|------|------|
+| Request body | **1 MB**（`express.json({ limit: '1mb' })`） |
+| `app_secret` 長度 | **64 字元 hex**（`crypto.randomBytes(32)`），exchange 先檢查長度再 `timingSafeEqual` |
+| Auth code 長度 | **64 字元 hex**，exchange 前嚴格比對長度 |
+| OAuth state 長度 | **64 字元 hex** |
+| Cookie `sameSite` | `lax`；`secure` 僅在 `NODE_ENV=production` 開啟 |
+| Redirect URL 協定 | 僅允許 `http:` / `https:`（防 `javascript:` 注入） |
+
+### 資料限制
+
+| 項目 | 限制 | 位置 |
+|------|------|------|
+| 每個 App 的 `redirect_uris` 筆數 | **最多 10 筆** | [backend/routes/allowedList.js](../backend/routes/allowedList.js) |
+| `/api/login-log` `pageSize` | **1 – 100**（超出自動 clamp） | [backend/services/loginLog.js](../backend/services/loginLog.js) |
+| 管理員 `email` 格式 | 必須符合 `^[^\s@]+@[^\s@]+\.[^\s@]+$` |
+| `domain` 格式 | 必須為合法 URL，協定限 `http:` / `https:` |
+| 重複 `domain` | DB UNIQUE 約束（軟刪除時不衝突；建立時若存在軟刪除同名紀錄會自動恢復） |
+
+### Rate Limit 限制
+
+| 範圍 | 限制 |
+|------|------|
+| 全域 | 500 次 / 15 分鐘 / IP |
+| Auth (`/login`、`/redirect`、`/authorize`) | 30 次 / 15 分鐘 / IP |
+| Session (`/me`、POST `/logout`) | 100 次 / 15 分鐘 / IP |
+| Exchange (`POST /sso/exchange`) | 20 次 / 1 分鐘 / IP |
+
+> 使用 `app.set('trust proxy', 1)`，rate limit 會從 `X-Forwarded-For` 取真實 IP。
+
+### 存取控制限制
+
+| 項目 | 規則 |
+|------|------|
+| `/api/allowed-list`、`/api/login-log`、`/api/admin-manager` | 必須通過 `adminAuth`：JWT 有效 → Redis session 存在 → `email` 在 `sso_admin_manager` 且 `is_active = TRUE` |
+| 非 SSO 流程直接登入管理後台 | `email` / `azure_oid` 須在 `sso_admin_manager`，否則跳 `?error=not_admin` |
+| SSO 流程（`ssoRedirect` 存在） | **不檢查管理員身份**，允許任何 AD 員工登入 Client App |
+| 管理員自刪 | `DELETE /api/admin-manager/:uid` 禁止刪除自己 |
+| 白名單網域（`config.frontendUrl`） | Microsoft 登入後會驗證 `FRONTEND_URL` 必須在 `sso_allowed_list` 中，否則 `?error=domain_not_allowed` |
+| Redirect URI 驗證 | authorize 的 `redirect_uri` 其 `URL.origin` 必須存在於該 App 的 `redirect_uris[]` |
+| Logout redirect | origin 必須在全體 `redirect_uris[]` 或 `FRONTEND_URL`；驗證後僅保留 origin（剝除 path/query/fragment） |
+
+### 登入流程限制
+
+| 項目 | 限制 |
+|------|------|
+| OAuth `state` 驗證 | `timingSafeEqual` 先比長度再比內容，不符即 `?error=invalid_state` |
+| Session fixation 防護 | Microsoft 登入成功後 `req.session.regenerate()` 重新產生 session ID |
+| Auth code 重用 | Redis Lua script `GET+DEL`，第二次使用直接 `401 Invalid or expired code` |
+| ERP 查詢失敗 | 不中斷登入，`status = erp_not_found`，`erpData` 為 `null` |
+| Microsoft token exchange 失敗 | 寫入 `sso_login_log` `status = failed` + `errorMessage`，redirect `?error=token_exchange_failed` |
+
+### 部署環境限制（目前狀態）
+
+| 項目 | 狀態 |
+|------|------|
+| 部署環境 | **僅 Test**（`*-test.apps.zerozero.tw`） |
+| Prod 環境 | **未部署**，`docker-compose-prod.yml` 為樣板 |
+| Client App MockA / MockB 本機 port | 3100 / 3200 |
+| SSO Frontend 本機 port | 3000 |
+| SSO Backend 本機 port | 3001 |
+| SSO Backend Test 容器 port | 35890 |
 
 ---
 
@@ -196,17 +288,19 @@ App-A 點登出 → /api/auth/logout
 | `description` | TEXT | 說明 |
 | `app_id` | UUID | OAuth2 Client ID（自動產生，UNIQUE） |
 | `app_secret` | VARCHAR(64) | OAuth2 Client Secret（自動產生，64 char hex） |
-| `redirect_uris` | TEXT[] | 允許的 redirect_uri origins（dev/test/prod） |
+| `redirect_uris` | TEXT[] | 允許的 redirect_uri origins（本機 / test，最多 10 筆） |
 | `is_active` | BOOLEAN | 是否啟用 |
 | `is_deleted` | BOOLEAN | 軟刪除 |
 | `created_at` / `updated_at` | TIMESTAMPTZ | 含時區 |
 
 **白名單用途：**
-1. **OAuth2 授權** — `client_id` 查找 + `redirect_uri` 驗證 `redirect_uris[]`
-2. **Code exchange** — 驗證 `client_id` + `client_secret`
-3. **CORS** — 從所有 App 的 `redirect_uris[]` 收集 origins + `FRONTEND_URL`
+1. **OAuth2 授權** — `client_id` 查找 + `redirect_uri` 的 `URL.origin` 必須在 `redirect_uris[]`
+2. **Code exchange** — 驗證 `client_id` + `client_secret`（`timingSafeEqual`）
+3. **CORS** — 從所有 App 的 `redirect_uris[]` 收集 origins + `FRONTEND_URL`（快取 60 秒）
 4. **Back-channel** — 從 `redirect_uris[]` 收集 origins + 對應的 `app_secret` 產生 HMAC
-5. **Redirect 驗證** — logout redirect 必須在 `redirect_uris[]` 中
+5. **Redirect 驗證** — logout redirect 的 origin 必須在 `redirect_uris[]` 中
+
+**限制：** 每個 App 最多 10 筆 `redirect_uris`，僅允許 `http:` / `https:` 協定
 
 ### sso_login_log（登入紀錄）
 
@@ -268,26 +362,31 @@ App-A 點登出 → /api/auth/logout
 | GET | `/api/auth/me` | 100/15min | 驗證 JWT + Redis（Cookie 或 Bearer） |
 | POST | `/api/auth/logout` | 100/15min | 登出（Bearer + HMAC back-channel） |
 
-### 應用程式管理（Admin）
+### 後台管理 API（皆須 `adminAuth` 中間件：JWT + Redis Session + 管理員白名單）
 
 | Method | Path | 說明 |
 |--------|------|------|
-| GET | `/api/allowed-list` | 取得所有 App（secret 遮蔽） |
+| GET | `/api/allowed-list` | 取得所有 App（secret 遮蔽為 `app_secret_last4`） |
 | GET | `/api/allowed-list/:uid` | 取得單筆（secret 遮蔽） |
-| POST | `/api/allowed-list` | 新增 App（自動產生 app_id + app_secret） |
-| PUT | `/api/allowed-list/:uid` | 更新（domain/name/redirect_uris/is_active） |
+| POST | `/api/allowed-list` | 新增 App（自動產生 `app_id` + `app_secret`） |
+| PUT | `/api/allowed-list/:uid` | 更新（domain / name / description / redirect_uris / is_active） |
 | DELETE | `/api/allowed-list/:uid` | 軟刪除 |
-| GET | `/api/allowed-list/:uid/credentials` | 取得完整 app_id + app_secret |
-| POST | `/api/allowed-list/:uid/regenerate-secret` | 重新產生 app_secret |
+| GET | `/api/allowed-list/:uid/credentials` | 取得完整 `app_id` + `app_secret` |
+| POST | `/api/allowed-list/:uid/regenerate-secret` | 重新產生 `app_secret` |
+| GET | `/api/login-log` | 登入紀錄搜尋（`email` / `status` / `startDate` / `endDate` / `page`） |
+| GET | `/api/admin-manager` | 取得所有管理員 |
+| GET | `/api/admin-manager/:uid` | 取得單筆管理員 |
+| POST | `/api/admin-manager` | 新增管理員（僅需 `email`） |
+| PUT | `/api/admin-manager/:uid` | 更新 `email` / `is_active` |
+| DELETE | `/api/admin-manager/:uid` | 軟刪除（禁止刪除自己） |
 
-### 其他
+### 公開 / 系統
 
 | Method | Path | 說明 |
 |--------|------|------|
-| GET | `/api/login-log` | 登入紀錄搜尋（email/status/date/page） |
-| GET/POST/PUT/DELETE | `/api/admin-manager` | 管理員 CRUD |
-| GET | `/api/health` | PostgreSQL + Redis 狀態 |
-| GET | `/api/docs` | Swagger API 文件 |
+| GET | `/api/health` | PostgreSQL + Redis 狀態（任一失敗回 503 degraded） |
+| GET | `/api/docs` | Swagger UI |
+| GET | `/api/docs.json` | Swagger JSON |
 
 ---
 
@@ -297,18 +396,22 @@ App-A 點登出 → /api/auth/logout
 
 | 變數 | 說明 |
 |------|------|
-| `PORT` | 後端 Port（預設 3001，prod 35890） |
-| `NODE_ENV` | `development` / `production` |
-| `FRONTEND_URL` | SSO Frontend URL（CORS 永遠允許） |
+| `PORT` | 後端 Port（預設 3001） |
+| `NODE_ENV` | 目前僅使用 `development`（本機）與 `test`（Test 容器），`production` 保留給未來 |
+| `FRONTEND_URL` | SSO Frontend URL（CORS 永遠允許，預設 `http://localhost:3000`） |
 | ✱ `SESSION_SECRET` | Express Session 密鑰 |
 | ✱ `JWT_SECRET` | JWT 簽名密鑰 |
-| `JWT_EXPIRES_IN` | JWT 過期時間（預設 24h） |
-| ✱ `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID` | Azure AD |
-| ✱ `AZURE_REDIRECT_URI` | OAuth Redirect URI |
-| `COOKIE_DOMAIN` | 共用 cookie domain（如 `.apps.zerozero.tw`） |
-| ✱ `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | PostgreSQL |
-| `REDIS_HOST` / `REDIS_PORT` / `REDIS_DB` | Redis（有預設值） |
-| `ERP_API_*` | ERP API（選填） |
+| `JWT_EXPIRES_IN` | JWT 過期時間（預設 `24h`） |
+| ✱ `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID` | Azure AD 應用程式設定 |
+| ✱ `AZURE_REDIRECT_URI` | Microsoft OAuth callback URL；`authPathSegment` 會從路徑 `/api/auth/{segment}/redirect` 自動解析 |
+| `COOKIE_DOMAIN` | 共用 cookie domain（如 `.apps.zerozero.tw`；未設則僅限同 origin） |
+| `ROPC_REDIRECT_URL` | 管理員直接登入成功後的預設跳轉路徑（預設 `/`） |
+| ✱ `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | PostgreSQL 必填 |
+| `PG_HOST` / `PG_PORT` / `PG_SCHEMA` | PostgreSQL 選填（預設 `localhost` / `5432` / `public`） |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_DB` | Redis 選填（預設 `localhost` / `6379` / `0`） |
+| `ERP_API_LOGIN_URL` / `ERP_API_SEARCH_URL` / `ERP_API_ACCOUNT` / `ERP_API_PASSWORD` | ERP 員工查詢（選填；未設則登入後 `status=erp_not_found`） |
+
+> 啟動時會檢查 ✱ 必填變數，缺任一項 `process.exit(1)`。
 
 ### Client App
 
@@ -328,12 +431,42 @@ App-A 點登出 → /api/auth/logout
 
 | 層級 | 技術 |
 |------|------|
-| SSO Frontend | Next.js + TypeScript + Tailwind CSS |
+| SSO Frontend | Next.js (App Router) + TypeScript + Tailwind CSS |
 | SSO Backend | Node.js + Express.js |
-| 安全 | Helmet + express-rate-limit + CORS 動態白名單 + HMAC-SHA256 |
-| 認證 | Microsoft Azure AD (OAuth 2.0 + MSAL) |
-| 資料庫 | PostgreSQL 16 |
-| Session / 快取 | Redis 7 (ioredis) |
-| Token | JWT (HS256, 24h) |
-| 部署 | Coolify + Docker Compose |
-| API 文件 | Swagger (swagger-jsdoc + swagger-ui-express) |
+| 安全 | Helmet + express-rate-limit + CORS 動態白名單 + HMAC-SHA256 + timingSafeEqual |
+| 認證 | Microsoft Azure AD (OAuth 2.0 + `@azure/msal-node`) |
+| 資料庫 | PostgreSQL 16（`node-pg-migrate` 管理 schema） |
+| Session / 快取 | Redis 7 (ioredis + `connect-redis`) |
+| Token | JWT HS256（預設 24h） |
+| API 文件 | Swagger（`swagger-jsdoc` + `swagger-ui-express`） |
+| 部署 | Coolify + Docker Compose（目前使用 `docker-compose-test.yml`；`-dev` / `-prod` 為本機開發與未來正式環境用的樣板，尚未啟用） |
+
+---
+
+## 專案結構
+
+```
+DF-SSO/
+├── backend/                   # Express.js SSO Authorization Server
+│   ├── server.js              # Helmet / CORS / rate limit / session / routes
+│   ├── config/                # index.js(env) / database / redis / msal / swagger
+│   ├── middleware/adminAuth.js# JWT + Redis session + admin 白名單
+│   ├── routes/                # auth / sso / allowedList / loginLog / adminManager
+│   ├── services/              # allowedList / loginLog / adminManager / erpApi
+│   ├── migrations/            # node-pg-migrate（10 筆 schema / seed / fix）
+│   └── sql/                   # 參考用 SQL
+├── frontend/                  # Next.js 管理後台
+│   └── src/app/
+│       ├── page.tsx           # 登入首頁
+│       ├── layout.tsx
+│       └── dashboard/page.tsx # 單頁 Tab 切換（應用程式 / 登入紀錄 / 管理員）
+├── microsoft-ad-login/        # Claude skill: SSO 整合器
+├── docs/Design.md             # 本文件
+├── INTEGRATION.md             # Client App 整合指引
+├── README.md
+├── docker-compose-dev.yml      # 本機開發樣板（未啟用）
+├── docker-compose-test.yml     # ★ 目前 Test 環境實際部署用
+└── docker-compose-prod.yml     # 未來正式環境樣板（未啟用）
+```
+
+> 目前所有 `*-test.apps.zerozero.tw` URL 皆屬於 Test 環境。正式環境（prod）的 domain、URL、Redis DB、Cookie domain 都尚未決定。

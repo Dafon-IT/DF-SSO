@@ -2,6 +2,8 @@
 
 本文件說明企業內部專案如何串接 DF-SSO 單一登入系統。
 
+> **部署狀態：** SSO 中央目前僅提供 Test 環境（`https://df-sso-login-test.apps.zerozero.tw`）。Client App 接入時先在本機 + Test 兩組 origin 完成整合，未來 prod 上線再把 prod origin 加入 `redirect_uris` 即可，`app_id` / `app_secret` 不變。
+
 ---
 
 ## 前置作業
@@ -25,10 +27,11 @@
 
 ### 2. SSO Backend URL
 
-| 環境 | URL |
-|------|-----|
-| Test | `https://df-sso-login-test.apps.zerozero.tw` |
-| 本機 | `http://localhost:3001` |
+| 環境 | URL | 狀態 |
+|------|-----|------|
+| 本機 | `http://localhost:3001` | 開發用 |
+| Test | `https://df-sso-login-test.apps.zerozero.tw` | **目前唯一線上環境** |
+| Prod | (未決定) | 尚未部署 |
 
 ---
 
@@ -47,8 +50,8 @@ NEXT_PUBLIC_SSO_APP_ID=<同 SSO_APP_ID>
 NEXT_PUBLIC_APP_URL=https://warehouse.apps.zerozero.tw
 ```
 
-> `app_id` + `app_secret` **跨環境共用**（dev/test/prod 同一組），只需改 `APP_URL`。
-> `APP_URL` 的 origin 必須在白名單的 `redirect_uris` 中。
+> `app_id` + `app_secret` **跨環境共用**（本機 / Test / 未來 prod 同一組），只需改 `APP_URL`。
+> `APP_URL` 的 origin 必須在白名單的 `redirect_uris` 中（每 App 最多 10 筆）。
 
 ---
 
@@ -317,7 +320,9 @@ export default function LoginPage() {
 | `Invalid client_id` | `SSO_APP_ID` 錯誤，或該 App 未啟用 |
 | `Invalid client credentials` | `SSO_APP_SECRET` 錯誤 |
 | `redirect_uri is not registered` | `APP_URL` origin 不在白名單的 `redirect_uris` 中 |
-| `Too many authentication attempts` | rate limit 超限，/me 和 /logout 為 100 次/15min |
+| `Too many authentication attempts` | rate limit 超限（authorize/login/redirect：30 次/15min） |
+| `Too many requests`（`/me` / `/logout`） | Session rate limit 超限（100 次/15min） |
+| `Too many exchange attempts` | Exchange rate limit 超限（20 次/1min） |
 | 登出後其他 App 仍可用 | 正常，其他 App 下次 `/me` 時收到 401 並清除 cookie |
 | `exchange_failed` | auth code 過期（60 秒）或已被使用，或 client credentials 錯誤 |
 | `Invalid signature`（back-channel） | `SSO_APP_SECRET` 與 SSO 端不一致，或 timestamp 超過 30 秒 |
