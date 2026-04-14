@@ -56,7 +56,7 @@ services:
   # ⚠️ seq 容器自己用預設 json-file driver，不要掛 gelf（bootstrap deadlock）
   # ============================================
   seq:
-    image: datalust/seq:latest
+    image: datalust/seq:2025.2
     restart: unless-stopped
     expose:
       - "80"
@@ -74,7 +74,7 @@ services:
   # ⚠️ Test 預設 host port = 12202（與 prod 的 12201 錯開，避免同台 host 衝突）
   # ============================================
   seq-input-gelf:
-    image: datalust/seq-input-gelf:latest
+    image: datalust/seq-input-gelf:latest   # 小工具鏡像，維持 latest 即可
     restart: unless-stopped
     depends_on:
       - seq
