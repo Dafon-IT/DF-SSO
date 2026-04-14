@@ -1,3 +1,28 @@
+# ============================================================
+# DF-SSO Test 環境 Coolify Compose
+#
+# ⚠️ 部署前必讀
+#
+# 1. Seq first-run admin 密碼
+#    seq-input-gelf 用 Coolify magic env `$SERVICE_PASSWORD_SEQ` 自動產生。
+#    部署後到 Coolify → Resource → Environment Variables 查 `SERVICE_PASSWORD_SEQ`
+#    實際值才能登入 Seq UI（帳號：admin）。
+#    密碼只在 volume 初次初始化時寫入；之後要改要進 Seq UI 內改，
+#    改 env 無效。
+#
+# 2. Seq GELF UDP port 衝突（test ↔ prod 同一台 Coolify host 時）
+#    Docker daemon 的 gelf driver 必須用 host-level UDP port，
+#    Test 預設使用 host port 12202（避開 prod 的 12201）。
+#    如果把 test 與 prod 部署到「不同」Coolify host，可改回 12201
+#    並同步修改下方 seq-input-gelf.ports 與 backend/frontend.logging.options.gelf-address。
+#
+# 3. Seq volume 殘留損壞
+#    多次部署失敗後 `sso-test-seq-data` 可能殘留半成品，噴
+#    `Failed to initialize storage`。到 Coolify UI 砍掉該 volume 再 redeploy。
+#
+# 4. 此檔 adminer 僅供 Test 使用，Prod 不保留（資安考量）。
+# ============================================================
+
 services:
   # ============================================
   # PostgreSQL
@@ -27,6 +52,43 @@ services:
       - sso-redis-data:/data
 
   # ============================================
+  # Seq Server（集中式 log UI）
+  # ⚠️ seq 容器自己用預設 json-file driver，不要掛 gelf（bootstrap deadlock）
+  # ============================================
+  seq:
+    image: datalust/seq:latest
+    restart: unless-stopped
+    expose:
+      - "80"
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_ADMINUSERNAME: admin
+      SEQ_FIRSTRUN_ADMINPASSWORD: $SERVICE_PASSWORD_SEQ
+      SERVICE_URL_SEQ_80:
+    volumes:
+      - sso-seq-data:/data
+
+  # ============================================
+  # Seq GELF Input（UDP → Seq HTTP）
+  # ⚠️ 規範例外：必須用 ports publish UDP 到 host，gelf driver 不走 Coolify 反代
+  # ⚠️ Test 預設 host port = 12202（與 prod 的 12201 錯開，避免同台 host 衝突）
+  # ============================================
+  seq-input-gelf:
+    image: datalust/seq-input-gelf:latest
+    restart: unless-stopped
+    depends_on:
+      - seq
+    environment:
+      SEQ_ADDRESS: http://seq
+    ports:
+      - "12202:12201/udp"
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://localhost:12202"
+        tag: "seq-input-gelf"
+
+  # ============================================
   # SSO Backend (Express.js)
   # ============================================
   backend:
@@ -36,6 +98,10 @@ services:
     restart: unless-stopped
     expose:
       - "35890"
+    depends_on:
+      - postgres
+      - redis
+      - seq-input-gelf
     environment:
       PORT: 35890
       NODE_ENV: test
@@ -58,12 +124,17 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DB: ${REDIS_DB}
-      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN}
       ERP_API_LOGIN_URL: ${ERP_API_LOGIN_URL}
       ERP_API_SEARCH_URL: ${ERP_API_SEARCH_URL}
       ERP_API_ACCOUNT: ${ERP_API_ACCOUNT}
       ERP_API_PASSWORD: ${ERP_API_PASSWORD}
       SERVICE_URL_BACKEND_35890:
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://localhost:12202"
+        tag: "sso-backend-test"
 
   # ============================================
   # SSO Frontend (Next.js)
@@ -78,20 +149,32 @@ services:
     restart: unless-stopped
     expose:
       - "3000"
+    depends_on:
+      - backend
+      - seq-input-gelf
     environment:
       NODE_ENV: test
       SERVICE_URL_FRONTEND_3000:
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://localhost:12202"
+        tag: "sso-frontend-test"
 
   # ============================================
-  # Adminer（資料庫管理工具）
+  # Adminer（資料庫管理工具，Test 限定）
+  # ⚠️ 正式環境不保留此服務
   # ============================================
   adminer:
     image: adminer:latest
     restart: unless-stopped
     expose:
       - "8080"
+    depends_on:
+      - postgres
     environment:
       ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DEFAULT_DB_DRIVER: pgsql
       ADMINER_DESIGN: dracula
       SERVICE_URL_ADMINER_8080:
 
@@ -100,3 +183,5 @@ volumes:
     name: sso-test-postgres-data
   sso-redis-data:
     name: sso-test-redis-data
+  sso-seq-data:
+    name: sso-test-seq-data

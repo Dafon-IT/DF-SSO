@@ -1,3 +1,28 @@
+# ============================================================
+# DF-SSO Prod 環境 Coolify Compose
+#
+# ⚠️ 部署前必讀
+#
+# 1. Seq first-run admin 密碼
+#    seq-input-gelf 用 Coolify magic env `$SERVICE_PASSWORD_SEQ` 自動產生。
+#    部署後到 Coolify → Resource → Environment Variables 查 `SERVICE_PASSWORD_SEQ`
+#    實際值才能登入 Seq UI（帳號：admin）。
+#    密碼只在 volume 初次初始化時寫入；之後要改要進 Seq UI 內改，
+#    改 env 無效。
+#
+# 2. Seq GELF UDP port（prod ↔ test 同一台 Coolify host 時）
+#    Docker daemon 的 gelf driver 必須用 host-level UDP port，
+#    Prod 使用 host port 12201；Test 已預設錯開為 12202，通常無衝突。
+#    如果兩環境部署在「不同」Coolify host，可自行統一成 12201 無影響。
+#
+# 3. Seq volume 殘留損壞
+#    多次部署失敗後 `sso-prod-seq-data` 可能殘留半成品，噴
+#    `Failed to initialize storage`。到 Coolify UI 砍掉該 volume 再 redeploy。
+#
+# 4. 此檔「不包含 adminer」— 正式環境禁止對外暴露 DB 管理介面（資安）。
+#    需要查資料請走 Test 環境或 SSH 進 container 操作。
+# ============================================================
+
 services:
   # ============================================
   # PostgreSQL
@@ -27,6 +52,43 @@ services:
       - sso-redis-data:/data
 
   # ============================================
+  # Seq Server（集中式 log UI）
+  # ⚠️ seq 容器自己用預設 json-file driver，不要掛 gelf（bootstrap deadlock）
+  # ============================================
+  seq:
+    image: datalust/seq:latest
+    restart: unless-stopped
+    expose:
+      - "80"
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_ADMINUSERNAME: admin
+      SEQ_FIRSTRUN_ADMINPASSWORD: $SERVICE_PASSWORD_SEQ
+      SERVICE_URL_SEQ_80:
+    volumes:
+      - sso-seq-data:/data
+
+  # ============================================
+  # Seq GELF Input（UDP 12201 → Seq HTTP）
+  # ⚠️ 規範例外：必須用 ports publish UDP 到 host，gelf driver 不走 Coolify 反代
+  # ⚠️ Prod 使用 host port 12201；Test 已錯開為 12202
+  # ============================================
+  seq-input-gelf:
+    image: datalust/seq-input-gelf:latest
+    restart: unless-stopped
+    depends_on:
+      - seq
+    environment:
+      SEQ_ADDRESS: http://seq
+    ports:
+      - "12201:12201/udp"
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://localhost:12201"
+        tag: "seq-input-gelf"
+
+  # ============================================
   # SSO Backend (Express.js)
   # ============================================
   backend:
@@ -39,6 +101,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - seq-input-gelf
     environment:
       PORT: 35890
       NODE_ENV: production
@@ -61,12 +124,17 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DB: ${REDIS_DB}
-      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN}
       ERP_API_LOGIN_URL: ${ERP_API_LOGIN_URL}
       ERP_API_SEARCH_URL: ${ERP_API_SEARCH_URL}
       ERP_API_ACCOUNT: ${ERP_API_ACCOUNT}
       ERP_API_PASSWORD: ${ERP_API_PASSWORD}
       SERVICE_URL_BACKEND_35890:
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://localhost:12201"
+        tag: "sso-backend-prod"
 
   # ============================================
   # SSO Frontend (Next.js)
@@ -83,12 +151,20 @@ services:
       - "3000"
     depends_on:
       - backend
+      - seq-input-gelf
     environment:
       NODE_ENV: production
       SERVICE_URL_FRONTEND_3000:
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://localhost:12201"
+        tag: "sso-frontend-prod"
 
 volumes:
   sso-postgres-data:
     name: sso-prod-postgres-data
   sso-redis-data:
     name: sso-prod-redis-data
+  sso-seq-data:
+    name: sso-prod-seq-data
