@@ -5,7 +5,6 @@ const RedisStore = require('connect-redis').default;
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const swaggerUi = require('swagger-ui-express');
 const config = require('./config');
@@ -15,7 +14,9 @@ const ssoRoutes = require('./routes/sso');
 const allowedListRoutes = require('./routes/allowedList');
 const loginLogRoutes = require('./routes/loginLog');
 const adminManagerRoutes = require('./routes/adminManager');
+const ssoSettingRoutes = require('./routes/ssoSetting');
 const allowedListService = require('./services/allowedList');
+const rateLimitManager = require('./services/rateLimitManager');
 const adminAuth = require('./middleware/adminAuth');
 
 // 初始化連線
@@ -48,47 +49,17 @@ app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use(cookieParser());
 
 // ============================================
-// Rate Limiting
+// Rate Limiting（設定存於 sso_setting 表，啟動後由 rateLimitManager 動態載入）
 // ============================================
 
-// 全域速率限制
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 分鐘
-  max: 500,                  // 每 IP 最多 500 次
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later' },
-});
+const {
+  globalLimiter,
+  authLimiter,
+  sessionLimiter,
+  exchangeLimiter,
+} = rateLimitManager;
+
 app.use(globalLimiter);
-
-// Auth 端點嚴格速率限制（防暴力攻擊，僅限登入/redirect 流程）
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 分鐘
-  max: 30,                   // 每 IP 最多 30 次
-  standardHeaders: true,
-  legacyHeaders: false,
-  // /me 和 POST /logout 是 Client App 高頻 server-to-server 呼叫，不套用嚴格限制
-  skip: (req) => req.path === '/me' || (req.method === 'POST' && req.path === '/logout'),
-  message: { error: 'Too many authentication attempts, please try again later' },
-});
-
-// /me 與 /logout 較寬鬆的速率限制（Client App 每次頁面載入都會呼叫）
-const sessionLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 分鐘
-  max: 100,                  // 每 IP 最多 100 次
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later' },
-});
-
-// SSO exchange 端點速率限制
-const exchangeLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,  // 1 分鐘
-  max: 20,                   // 每 IP 最多 20 次
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many exchange attempts' },
-});
 
 // ============================================
 // CORS（從 DB 白名單動態載入）
@@ -166,6 +137,8 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/allowed-list', adminAuth, allowedListRoutes);
 app.use('/api/login-log', adminAuth, loginLogRoutes);
 app.use('/api/admin-manager', adminAuth, adminManagerRoutes);
+// 後台 CRUD 為低頻操作，沿用預設 globalLimiter 即可
+app.use('/api/sso-setting', adminAuth, ssoSettingRoutes);
 
 // Health check
 app.get('/api/health', async (req, res) => {
@@ -216,6 +189,10 @@ app.use((err, req, res, _next) => {
 
 const server = app.listen(config.port, () => {
   console.log(`DF-SSO Backend running on http://localhost:${config.port} [${config.nodeEnv}]`);
+  // 從 sso_setting 表載入 rate limit 設定覆蓋預設值
+  rateLimitManager.reload().then((ok) => {
+    if (ok) console.log('Rate limit settings loaded from sso_setting table');
+  });
 });
 
 // ============================================

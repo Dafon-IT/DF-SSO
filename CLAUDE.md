@@ -34,8 +34,8 @@ docker-compose-prod.yml     # ★ Coolify Prod 實際部署
 - [server.js](backend/server.js) — Helmet / CORS 動態白名單 / rate limit / session / route 掛載 / graceful shutdown
 - [config/index.js](backend/config/index.js) — **所有 `process.env` 讀取都集中在此**；其他模組一律 `require('../config')`。啟動會驗證必要變數
 - [middleware/adminAuth.js](backend/middleware/adminAuth.js) — JWT + Redis Session + 管理員白名單三層驗證，保護 `/api/allowed-list`、`/api/login-log`、`/api/admin-manager`
-- [routes/](backend/routes/) — `auth.js`（Microsoft OAuth + `/me` + `/logout`）、`sso.js`（`/authorize` + `/exchange` + `/logout`）、`allowedList.js`、`loginLog.js`、`adminManager.js`
-- [services/](backend/services/) — DB 查詢邏輯（`allowedList`、`loginLog`、`adminManager`、`erpApi`）
+- [routes/](backend/routes/) — `auth.js`（Microsoft OAuth + `/me` + `/logout`）、`sso.js`（`/authorize` + `/exchange` + `/logout`）、`allowedList.js`、`loginLog.js`、`adminManager.js`、`ssoSetting.js`
+- [services/](backend/services/) — DB 查詢邏輯（`allowedList`、`loginLog`、`adminManager`、`erpApi`、`ssoSetting`） + `rateLimitManager.js`（動態 rate limit）
 - [migrations/dev/](backend/migrations/dev/) — Test / Dev 環境用的完整歷史（10 筆 schema / seed / fix）
 - [migrations/prod/](backend/migrations/prod/) — Prod 環境用的乾淨 baseline（3 筆：init-schema + admin seed + allowed_list seed）
 - 由 [backend/Dockerfile](backend/Dockerfile) 的 `MIGRATIONS_DIR` 環境變數選目錄（`dev` / `prod`）
@@ -115,12 +115,16 @@ docker compose -f docker-compose-prod.yml up   # Prod 環境
 
 ## Rate Limit 分層速查
 
-| 範圍 | 限制 | 說明 |
-|------|------|------|
-| 全域 | 500 / 15min | 防 DoS |
-| Auth（login / redirect / authorize） | 30 / 15min | 防暴力登入 |
-| Session（`/me`、POST `/logout`） | 100 / 15min | Client App 高頻 server-to-server |
-| Exchange | 20 / 1min | 防 auth code 猜測 |
+**不再寫死在 server.js**，實際值由 `sso_setting` 表（category = `rate_limit`）動態載入，管理員可在 Dashboard「設定」分頁即時調整。Backend 由 [backend/services/rateLimitManager.js](backend/services/rateLimitManager.js) 用 wrapper middleware 指向可變 instance，`PUT /api/sso-setting/rate_limit.*` 成功後會 `reload()` 重建四個 limiter（視窗計數會歸零）。若 DB 不可用則 fallback 到下表預設值。
+
+| 範圍 | 預設值 | sso_setting key | 說明 |
+|------|--------|------------------|------|
+| 全域 | 500 / 15min | `rate_limit.global` | 防 DoS |
+| Auth（login / redirect / authorize） | 30 / 15min | `rate_limit.auth` | 防暴力登入 |
+| Session（`/me`、POST `/logout`） | 100 / 15min | `rate_limit.session` | Client App 高頻 server-to-server |
+| Exchange | 20 / 1min | `rate_limit.exchange` | 防 auth code 猜測 |
+
+要改 `skip` / `message` 等 limiter option 邏輯請改 [services/rateLimitManager.js](backend/services/rateLimitManager.js)，不要改 `server.js`。
 
 新增 route 如果是 Client App 高頻呼叫，記得在 [server.js](backend/server.js) 用 `sessionLimiter` 覆蓋預設的 `authLimiter`。
 

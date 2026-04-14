@@ -59,6 +59,17 @@ interface LoginLog {
   created_at: string;
 }
 
+interface SettingItem {
+  ppid: number;
+  key: string;
+  value: Record<string, unknown>;
+  category: string;
+  label: string | null;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ============================================
 // Main Dashboard
 // ============================================
@@ -66,7 +77,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"allowed" | "logs" | "admins">("allowed");
+  const [activeTab, setActiveTab] = useState<"allowed" | "logs" | "admins" | "settings">("allowed");
 
   useEffect(() => {
     fetch(`${API}/api/auth/me`, { credentials: "include" })
@@ -151,6 +162,16 @@ export default function DashboardPage() {
           >
             管理員
           </button>
+          <button
+            onClick={() => setActiveTab("settings")}
+            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors ${
+              activeTab === "settings"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            設定
+          </button>
         </div>
       </div>
 
@@ -159,6 +180,7 @@ export default function DashboardPage() {
         {activeTab === "allowed" && <AllowedListPanel />}
         {activeTab === "logs" && <LoginLogPanel />}
         {activeTab === "admins" && <AdminManagerPanel />}
+        {activeTab === "settings" && <SettingsPanel />}
       </main>
     </div>
   );
@@ -959,6 +981,226 @@ function AdminManagerPanel() {
           </table>
         )}
       </div>
+    </div>
+  );
+}
+
+// ============================================
+// Settings Panel — 動態編輯 sso_setting 表
+// ============================================
+const CATEGORY_LABELS: Record<string, string> = {
+  rate_limit: "速率限制（Rate Limit）",
+  general: "一般設定",
+};
+
+function SettingsPanel() {
+  const [items, setItems] = useState<SettingItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>({});
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  const fetchSettings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/sso-setting`, { credentials: "include" });
+      const data = await res.json();
+      if (data.success) {
+        setItems(data.data);
+        const initialDrafts: Record<string, Record<string, unknown>> = {};
+        for (const item of data.data as SettingItem[]) {
+          initialDrafts[item.key] = { ...item.value };
+        }
+        setDrafts(initialDrafts);
+      }
+    } catch (e) {
+      console.error("Fetch sso-setting error:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  const setField = (key: string, field: string, value: unknown) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [key]: { ...(prev[key] || {}), [field]: value },
+    }));
+  };
+
+  const isDirty = (item: SettingItem) => {
+    const draft = drafts[item.key] || {};
+    return JSON.stringify(draft) !== JSON.stringify(item.value);
+  };
+
+  const handleSave = async (item: SettingItem) => {
+    const draft = drafts[item.key];
+    if (!draft) return;
+    setSavingKey(item.key);
+    try {
+      const res = await fetch(`${API}/api/sso-setting/${encodeURIComponent(item.key)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ value: draft }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchSettings();
+      } else {
+        alert(data.error || "儲存失敗");
+      }
+    } catch {
+      alert("儲存失敗");
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const handleReset = (item: SettingItem) => {
+    setDrafts((prev) => ({ ...prev, [item.key]: { ...item.value } }));
+  };
+
+  const grouped = items.reduce<Record<string, SettingItem[]>>((acc, item) => {
+    (acc[item.category] = acc[item.category] || []).push(item);
+    return acc;
+  }, {});
+
+  const renderRateLimitEditor = (item: SettingItem) => {
+    const draft = drafts[item.key] || {};
+    const windowMs = Number(draft.windowMs ?? 0);
+    const max = Number(draft.max ?? 0);
+    const windowMinutes = windowMs / 60000;
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            視窗長度 windowMs（毫秒）
+          </label>
+          <input
+            type="number"
+            min={1000}
+            step={1000}
+            value={windowMs}
+            onChange={(e) => setField(item.key, "windowMs", Number(e.target.value))}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <p className="mt-1 text-xs text-gray-400">
+            約 {windowMinutes >= 1 ? `${windowMinutes} 分鐘` : `${windowMs / 1000} 秒`}
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            最大請求數 max（每 IP / 每視窗）
+          </label>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={max}
+            onChange={(e) => setField(item.key, "max", Number(e.target.value))}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+    );
+  };
+
+  const renderJsonEditor = (item: SettingItem) => {
+    const draft = drafts[item.key] || {};
+    const text = JSON.stringify(draft, null, 2);
+    return (
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">JSON value</label>
+        <textarea
+          rows={5}
+          value={text}
+          onChange={(e) => {
+            try {
+              const parsed = JSON.parse(e.target.value);
+              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                setDrafts((prev) => ({ ...prev, [item.key]: parsed }));
+              }
+            } catch {
+              // 無效 JSON 時先不更新 draft
+            }
+          }}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-semibold text-gray-900">系統設定</h2>
+        <p className="text-sm text-gray-500 mt-0.5">
+          儲存於 sso_setting 表，rate_limit 類型修改後立即生效（視窗計數會重置）
+        </p>
+      </div>
+
+      {loading ? (
+        <p className="py-12 text-center text-sm text-gray-400">載入中...</p>
+      ) : items.length === 0 ? (
+        <p className="py-12 text-center text-sm text-gray-400">尚無設定</p>
+      ) : (
+        Object.entries(grouped).map(([category, group]) => (
+          <section key={category} className="space-y-3">
+            <h3 className="text-base font-semibold text-gray-800">
+              {CATEGORY_LABELS[category] || category}
+            </h3>
+            <div className="grid gap-4">
+              {group.map((item) => {
+                const dirty = isDirty(item);
+                const saving = savingKey === item.key;
+                return (
+                  <div key={item.key} className="rounded-xl bg-white shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+                      <div>
+                        <h4 className="font-semibold text-gray-900">{item.label || item.key}</h4>
+                        <code className="text-xs text-gray-400 font-mono">{item.key}</code>
+                      </div>
+                      {dirty && (
+                        <span className="text-xs font-medium text-amber-600">未儲存</span>
+                      )}
+                    </div>
+                    <div className="px-5 py-4 space-y-3">
+                      {item.description && (
+                        <p className="text-sm text-gray-500">{item.description}</p>
+                      )}
+                      {category === "rate_limit"
+                        ? renderRateLimitEditor(item)
+                        : renderJsonEditor(item)}
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={!dirty || saving}
+                          onClick={() => handleSave(item)}
+                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {saving ? "儲存中..." : "儲存"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!dirty || saving}
+                          onClick={() => handleReset(item)}
+                          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          重設
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ))
+      )}
     </div>
   );
 }

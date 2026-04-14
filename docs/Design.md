@@ -189,8 +189,10 @@ App-A 點登出 → /api/auth/logout
 
 ### Rate Limiting
 
-| 範圍 | 限制 | 說明 |
-|------|------|------|
+Rate limit 設定**不寫死在程式碼內**，實際值來自 `sso_setting` 表的 `rate_limit.*` 四筆 seed，可於 Dashboard 的「設定」分頁即時調整；backend 由 [services/rateLimitManager.js](../backend/services/rateLimitManager.js) 的 wrapper middleware 指向可變的 limiter instance，PUT `/api/sso-setting/:key` 成功後會 `reload()` 重建 instance 讓新值立即生效（視窗計數會重置）。若啟動時 DB 不可用則 fallback 到下表預設值。
+
+| 範圍 | 預設值 | 說明 |
+|------|--------|------|
 | 全域 | 500 / 15min | 防 DoS |
 | Auth（login/redirect/authorize） | 30 / 15min | 防暴力登入 |
 | Session（/me、POST /logout） | 100 / 15min | Client App 高頻 server-to-server |
@@ -236,14 +238,17 @@ App-A 點登出 → /api/auth/logout
 
 ### Rate Limit 限制
 
-| 範圍 | 限制 |
-|------|------|
-| 全域 | 500 次 / 15 分鐘 / IP |
-| Auth (`/login`、`/redirect`、`/authorize`) | 30 次 / 15 分鐘 / IP |
-| Session (`/me`、POST `/logout`) | 100 次 / 15 分鐘 / IP |
-| Exchange (`POST /sso/exchange`) | 20 次 / 1 分鐘 / IP |
+> 所有值由 `sso_setting` 表（category = `rate_limit`）動態載入，管理員可於 Dashboard「設定」分頁即時調整；以下為 seed / fallback 預設值。
+
+| 範圍 | 預設值 | sso_setting key |
+|------|--------|------------------|
+| 全域 | 500 次 / 15 分鐘 / IP | `rate_limit.global` |
+| Auth (`/login`、`/redirect`、`/authorize`) | 30 次 / 15 分鐘 / IP | `rate_limit.auth` |
+| Session (`/me`、POST `/logout`) | 100 次 / 15 分鐘 / IP | `rate_limit.session` |
+| Exchange (`POST /sso/exchange`) | 20 次 / 1 分鐘 / IP | `rate_limit.exchange` |
 
 > 使用 `app.set('trust proxy', 1)`，rate limit 會從 `X-Forwarded-For` 取真實 IP。
+> 修改設定後 wrapper middleware 會重建 limiter instance，當前視窗的計數會歸零。
 
 ### 存取控制限制
 
@@ -340,6 +345,24 @@ App-A 點登出 → /api/auth/logout
 | `is_newer` | BOOLEAN | 是否尚未登入 |
 | `is_deleted` | BOOLEAN | 軟刪除 |
 
+### sso_setting（系統動態設定）
+
+通用 key-value 表，儲存可在 Dashboard 即時修改的 runtime 設定。目前只放 rate limit 四筆 seed，但表結構設計為通用，未來可追加其他類別（例如 session TTL、CORS 快取 TTL）而無需改 schema。
+
+| 欄位 | 型態 | 說明 |
+|------|------|------|
+| `ppid` | SERIAL PK | 自動遞增主鍵 |
+| `key` | VARCHAR(128) UNIQUE | 設定 key，以 `{category}.{name}` 命名（例如 `rate_limit.global`） |
+| `value` | JSONB | 設定內容，格式由 category 決定 |
+| `category` | VARCHAR(64) | 類別（目前：`rate_limit`） |
+| `label` | VARCHAR(255) | 顯示用中文名稱 |
+| `description` | TEXT | 顯示用說明 |
+| `created_at` / `updated_at` | TIMESTAMPTZ | 含時區（BEFORE UPDATE trigger 自動更新 `updated_at`） |
+
+**Rate limit 設定格式**：`value = { "windowMs": <number>, "max": <number> }`，`windowMs >= 1000`、`max >= 1`。
+
+Seed 四筆 key：`rate_limit.global` / `rate_limit.auth` / `rate_limit.session` / `rate_limit.exchange`。
+
 ---
 
 ## Redis 設計
@@ -388,6 +411,9 @@ App-A 點登出 → /api/auth/logout
 | POST | `/api/admin-manager` | 新增管理員（僅需 `email`） |
 | PUT | `/api/admin-manager/:uid` | 更新 `email` / `is_active` |
 | DELETE | `/api/admin-manager/:uid` | 軟刪除（禁止刪除自己） |
+| GET | `/api/sso-setting` | 取得全部系統設定（依 category + key 排序） |
+| GET | `/api/sso-setting/:key` | 取得單筆設定 |
+| PUT | `/api/sso-setting/:key` | 更新 `value`；`rate_limit.*` key 成功後會立即重建 rate limiter instance |
 
 ### 公開 / 系統
 
