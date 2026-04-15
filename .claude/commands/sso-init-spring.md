@@ -217,7 +217,103 @@ public class SsoCookieUtil {
 }
 ```
 
-### 4. 建立 `SsoController.java`
+### 4. 建立 `SsoAuthGuard.java` — Auth Middleware
+
+**整個整合的核心**。所有 protected endpoint（包含 `/me` 本身）都必須透過這個 Guard，才能保證「中央 session 被撤銷後下一次呼叫立即失效」。
+
+路徑：`src/main/java/{PKG_PATH}/sso/SsoAuthGuard.java`
+
+```java
+package {PKG}.sso;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+
+import java.util.Map;
+
+@Component
+public class SsoAuthGuard {
+
+    private static final Logger log = LoggerFactory.getLogger(SsoAuthGuard.class);
+
+    private final SsoClient ssoClient;
+    private final SsoProperties props;
+
+    public SsoAuthGuard(SsoClient ssoClient, SsoProperties props) {
+        this.ssoClient = ssoClient;
+        this.props = props;
+    }
+
+    private boolean isSecure() {
+        return props.getAppUrl() != null && props.getAppUrl().startsWith("https://");
+    }
+
+    /**
+     * Protected endpoint 入口都呼叫這個：成功回 user map；失敗 throw SsoUnauthorizedException。
+     * <p>
+     * - no_token        → 401 + 無 token
+     * - session_expired → 401 + 自動清本地 cookie
+     * - sso_unreachable → 502（SSO 暫時不可達）
+     */
+    public Map<String, Object> requireAuth(HttpServletRequest req, HttpServletResponse res) {
+        String token = SsoCookieUtil.readToken(req);
+        if (token == null) {
+            throw new SsoUnauthorizedException(SsoAuthError.NO_TOKEN);
+        }
+
+        Map<String, Object> payload;
+        try {
+            payload = ssoClient.me(token);
+        } catch (WebClientResponseException e) {
+            if (e.getStatusCode().value() == 401) {
+                SsoCookieUtil.clearToken(res, isSecure());
+                throw new SsoUnauthorizedException(SsoAuthError.SESSION_EXPIRED);
+            }
+            throw new SsoUnauthorizedException(SsoAuthError.SSO_UNREACHABLE);
+        } catch (Exception e) {
+            log.warn("[SSO] /me failed: {}", e.getMessage());
+            throw new SsoUnauthorizedException(SsoAuthError.SSO_UNREACHABLE);
+        }
+
+        if (payload == null || payload.get("user") == null) {
+            throw new SsoUnauthorizedException(SsoAuthError.SSO_UNREACHABLE);
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> user = (Map<String, Object>) payload.get("user");
+        return user;
+    }
+
+    public enum SsoAuthError {
+        NO_TOKEN(401, "no_token"),
+        SESSION_EXPIRED(401, "session_expired"),
+        SSO_UNREACHABLE(502, "sso_unreachable");
+
+        public final int status;
+        public final String code;
+
+        SsoAuthError(int status, String code) {
+            this.status = status;
+            this.code = code;
+        }
+    }
+
+    public static class SsoUnauthorizedException extends RuntimeException {
+        public final SsoAuthError error;
+
+        public SsoUnauthorizedException(SsoAuthError error) {
+            super(error.code);
+            this.error = error;
+        }
+    }
+}
+```
+
+### 5. 建立 `SsoController.java`
 
 路徑：`src/main/java/{PKG_PATH}/sso/SsoController.java`
 
@@ -250,10 +346,12 @@ public class SsoController {
     private static final long MAX_TIMESTAMP_DRIFT_MS = 30_000L;
 
     private final SsoClient ssoClient;
+    private final SsoAuthGuard ssoAuthGuard;
     private final SsoProperties props;
 
-    public SsoController(SsoClient ssoClient, SsoProperties props) {
+    public SsoController(SsoClient ssoClient, SsoAuthGuard ssoAuthGuard, SsoProperties props) {
         this.ssoClient = ssoClient;
+        this.ssoAuthGuard = ssoAuthGuard;
         this.props = props;
     }
 
@@ -288,30 +386,14 @@ public class SsoController {
         }
     }
 
-    /** 2. /me：用 cookie 讀 token，轉發給 SSO，回傳 user payload */
+    /**
+     * 2. /me — 完全委託給 SsoAuthGuard。handler 只負責把 user 回給前端。
+     *    失敗情境由全域 {@link SsoAuthExceptionHandler} 統一轉成 401/502。
+     */
     @GetMapping("/me")
     public ResponseEntity<?> me(HttpServletRequest req, HttpServletResponse res) {
-        String token = SsoCookieUtil.readToken(req);
-        if (token == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "no_token"));
-        }
-        try {
-            Map<String, Object> payload = ssoClient.me(token);
-            return ResponseEntity.ok(payload);
-        } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
-            if (e.getStatusCode().value() == 401) {
-                SsoCookieUtil.clearToken(res, isSecure());
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "session_expired"));
-            }
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body(Map.of("error", "sso_error"));
-        } catch (Exception e) {
-            log.warn("[SSO] /me failed: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body(Map.of("error", "sso_unreachable"));
-        }
+        Map<String, Object> user = ssoAuthGuard.requireAuth(req, res);
+        return ResponseEntity.ok(Map.of("user", user));
     }
 
     /** 3. /logout：通知 SSO，清 cookie，導回首頁 */
@@ -369,7 +451,34 @@ public class SsoController {
 }
 ```
 
-### 5. 啟用 `@ConfigurationProperties`
+### 6. 建立 `SsoAuthExceptionHandler.java` — 統一處理 SsoUnauthorizedException
+
+路徑：`src/main/java/{PKG_PATH}/sso/SsoAuthExceptionHandler.java`
+
+```java
+package {PKG}.sso;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.util.Map;
+
+@RestControllerAdvice
+public class SsoAuthExceptionHandler {
+
+    @ExceptionHandler(SsoAuthGuard.SsoUnauthorizedException.class)
+    public ResponseEntity<Map<String, String>> handle(SsoAuthGuard.SsoUnauthorizedException ex) {
+        HttpStatus status = ex.error.status == 401 ? HttpStatus.UNAUTHORIZED : HttpStatus.BAD_GATEWAY;
+        return ResponseEntity.status(status).body(Map.of("error", ex.error.code));
+    }
+}
+```
+
+> 這個 `@RestControllerAdvice` 會**同時接住** `/me` 以及所有其他 controller 呼叫 `ssoAuthGuard.requireAuth(...)` 時拋出的例外，統一回 `{"error": "no_token" | "session_expired" | "sso_unreachable"}`。Cookie 清除在 Guard 內已處理完畢。
+
+### 7. 啟用 `@ConfigurationProperties`
 
 路徑：`src/main/java/{PKG_PATH}/{MainApplication}.java`
 
@@ -384,7 +493,7 @@ import {PKG}.sso.SsoProperties;
 public class MainApplication { ... }
 ```
 
-### 6. 更新 `application.yml`（或 `application.properties`）
+### 8. 更新 `application.yml`（或 `application.properties`）
 
 **`application.yml`**（若使用）：
 
@@ -407,7 +516,7 @@ sso.app-url=${APP_URL:http://localhost:{使用者填的 Port}}
 sso.timeout-ms=8000
 ```
 
-### 7. 建立或更新 `.env`
+### 9. 建立或更新 `.env`
 
 在專案根目錄 `.env`（或 `env.local`、部署平台的環境變數）**追加**：
 
@@ -422,7 +531,7 @@ APP_URL={使用者填的 App URL}
 > ⚠️ `SSO_APP_SECRET` **絕不可** commit 進 git，也不可暴露給前端。
 > ⚠️ Spring Boot 預設不自動讀 `.env`，請透過 shell、Docker、Coolify 或 [`spring-dotenv`](https://github.com/paulschwarz/spring-dotenv) 之類工具載入。
 
-### 8. 顯示完成訊息
+### 10. 顯示完成訊息
 
 告知使用者：
 
@@ -433,20 +542,45 @@ APP_URL={使用者填的 App URL}
   src/main/java/{PKG_PATH}/sso/SsoProperties.java
   src/main/java/{PKG_PATH}/sso/SsoClient.java
   src/main/java/{PKG_PATH}/sso/SsoCookieUtil.java
-  src/main/java/{PKG_PATH}/sso/SsoController.java
+  src/main/java/{PKG_PATH}/sso/SsoAuthGuard.java          — auth middleware（reusable）
+  src/main/java/{PKG_PATH}/sso/SsoAuthExceptionHandler.java — 統一 401/502 回應
+  src/main/java/{PKG_PATH}/sso/SsoController.java         — 4 個端點，/me 一行委託 Guard
   application.yml（或 .properties）— 已追加 sso.* 設定
   .env — 已追加 SSO 環境變數
 
 📋 接下來你需要：
 
-1. 請 SSO 管理員在白名單新增你的系統
+1. 確認 SSO Dashboard 的白名單：
    - 網域：{使用者填的 App URL}
    - Redirect URIs 要包含：{使用者填的 App URL}
-   取得 app_id / app_secret 後填進 .env
 
 2. 在 Spring Boot 主程式加上 @EnableConfigurationProperties(SsoProperties.class)
 
-3. 在你的登入頁（Thymeleaf / React / Vue 都可）加上按鈕：
+3. 所有需要登入的 protected controller 一律透過 SsoAuthGuard.requireAuth(...)：
+
+   @RestController
+   public class AssetsController {
+       private final SsoAuthGuard ssoAuthGuard;
+
+       public AssetsController(SsoAuthGuard ssoAuthGuard) {
+           this.ssoAuthGuard = ssoAuthGuard;
+       }
+
+       @GetMapping("/api/assets")
+       public ResponseEntity<?> list(HttpServletRequest req, HttpServletResponse res) {
+           Map<String, Object> user = ssoAuthGuard.requireAuth(req, res);
+           // user 保證已登入；每次呼叫都已向中央 Redis 確認 session
+           return ResponseEntity.ok(Map.of(
+               "viewer", user.get("email"),
+               "assets", List.of()
+           ));
+       }
+   }
+
+   失敗時會拋 SsoUnauthorizedException，由 SsoAuthExceptionHandler
+   統一轉成 {"error": "no_token"|"session_expired"|"sso_unreachable"} + 401/502。
+
+4. 在你的登入頁（Thymeleaf / React / Vue 都可）加上按鈕：
 
    const SSO_URL  = "{使用者填的 SSO URL}";
    const APP_URL  = "{使用者填的 App URL}";
@@ -458,14 +592,14 @@ APP_URL={使用者填的 App URL}
 
    <button onClick={() => window.location.href = ssoUrl}>透過 DF-SSO 登入</button>
 
-4. 在需要驗證的頁面呼叫：
+5. 在需要驗證的頁面呼叫：
 
    fetch("/api/auth/me", { credentials: "include" })
      .then(res => res.ok ? res.json() : Promise.reject())
      .then(data => setUser(data.user))
      .catch(() => window.location.href = ssoUrl);
 
-5. 登出按鈕：
+6. 登出按鈕：
 
    <a href="/api/auth/logout">登出</a>
 ```

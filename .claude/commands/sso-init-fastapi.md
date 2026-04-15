@@ -45,8 +45,9 @@ pip install "fastapi>=0.110" "httpx>=0.27" "pydantic-settings>=2.0" python-doten
 ```python
 from .router import router as sso_router
 from .config import sso_settings
+from .deps import require_auth, SsoUser
 
-__all__ = ["sso_router", "sso_settings"]
+__all__ = ["sso_router", "sso_settings", "require_auth", "SsoUser"]
 ```
 
 ### 2. 建立 `{APP_DIR}/sso/config.py`
@@ -184,25 +185,92 @@ def verify_back_channel_signature(
     return True, None
 ```
 
-### 5. 建立 `{APP_DIR}/sso/router.py`
+### 5. 建立 `{APP_DIR}/sso/deps.py` — Auth Middleware（FastAPI Depends）
+
+**整個整合的核心**。所有 protected endpoint（包含 `/me` 本身）都必須透過這個 `require_auth` dependency，才能保證「中央 session 被撤銷後下一次呼叫立即失效」。
+
+```python
+from typing import Any
+
+from fastapi import Cookie, HTTPException, Response, status
+from pydantic import BaseModel
+
+from . import client
+
+
+TOKEN_COOKIE = "token"
+
+
+class SsoUser(BaseModel):
+    userId: str
+    email: str
+    name: str
+    erpData: dict[str, str] | None = None
+    loginAt: str
+
+
+def _clear_token_cookie(resp: Response) -> None:
+    resp.delete_cookie(key=TOKEN_COOKIE, path="/")
+
+
+async def require_auth(
+    response: Response,
+    token: str | None = Cookie(default=None),
+) -> SsoUser:
+    """Protected endpoint 入口都 Depends 這個。成功 → SsoUser；失敗 → HTTPException。
+
+    no_token      → 401 + no_token（前端應自動導向 SSO）
+    session_expired → 401 + session_expired + 清本地 cookie（前端顯示按鈕）
+    sso_unreachable → 502（SSO 暫時不可達）
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "no_token"},
+        )
+
+    try:
+        code, payload = await client.me(token)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "sso_unreachable"},
+        )
+
+    if code == 401:
+        _clear_token_cookie(response)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "session_expired"},
+        )
+    if code != 200 or payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "sso_error"},
+        )
+
+    user_data: dict[str, Any] = payload.get("user") or {}
+    return SsoUser(**user_data)
+```
+
+### 6. 建立 `{APP_DIR}/sso/router.py`
 
 ```python
 import logging
-from typing import Any
 
-from fastapi import APIRouter, Cookie, Request, Response
+from fastapi import APIRouter, Cookie, Depends, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from . import client
 from .config import sso_settings
+from .deps import SsoUser, require_auth, TOKEN_COOKIE
 from .security import verify_back_channel_signature
 
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["sso"])
 
-TOKEN_COOKIE = "token"
 COOKIE_MAX_AGE = 24 * 60 * 60  # 24 小時
 
 
@@ -243,31 +311,11 @@ async def callback(code: str | None = None) -> Response:
     return resp
 
 
-# ---------- 2. /me ----------
+# ---------- 2. /me（直接 Depends require_auth，一行 handler） ----------
 @router.get("/me")
-async def me(token: str | None = Cookie(default=None)) -> Response:
-    """讀 cookie → 轉發給 SSO /me → 回傳 user payload。
-
-    注意:no_token 與 session_expired 的區分很重要,
-    前端據此決定「自動導向 SSO」還是「顯示登入按鈕」。
-    """
-    if not token:
-        return JSONResponse(status_code=401, content={"error": "no_token"})
-
-    try:
-        status, payload = await client.me(token)
-    except Exception as e:
-        log.warning("[SSO] /me failed: %s", e)
-        return JSONResponse(status_code=502, content={"error": "sso_unreachable"})
-
-    if status == 401:
-        resp = JSONResponse(status_code=401, content={"error": "session_expired"})
-        _clear_token_cookie(resp)
-        return resp
-    if status != 200 or payload is None:
-        return JSONResponse(status_code=502, content={"error": "sso_error"})
-
-    return JSONResponse(status_code=200, content=payload)
+async def me(user: SsoUser = Depends(require_auth)) -> dict:
+    """`/me` 本身就是 middleware 的第一個使用者,handler 只負責回 user。"""
+    return {"user": user.model_dump()}
 
 
 # ---------- 3. /logout ----------
@@ -306,7 +354,7 @@ async def back_channel_logout(payload: BackChannelPayload, request: Request) -> 
     return JSONResponse(status_code=200, content={"success": True})
 ```
 
-### 6. 在 `main.py` 掛上 router
+### 7. 在 `main.py` 掛上 router
 
 找到 FastAPI 專案的入口(通常是 `{APP_DIR}/main.py` 或 `main.py`),加上：
 
@@ -323,7 +371,7 @@ app.include_router(sso_router)
 > 若是 `src/main.py` 結構,import 路徑要調成 `from src.sso import sso_router`。
 > 若尚未建立 `main.py`,請同步建立一個最小骨架(不覆蓋既有檔案)。
 
-### 7. 建立或更新 `.env`
+### 8. 建立或更新 `.env`
 
 在專案根目錄 `.env` **追加**下列環境變數(不覆蓋原有內容)：
 
@@ -346,34 +394,55 @@ APP_URL={使用者填的 App URL}
 .env.*.local
 ```
 
-### 8. 顯示完成訊息
+### 9. 顯示完成訊息
 
 告知使用者：
 
 ```
-✅ SSO 登入器整合完成(Python FastAPI)!
+✅ SSO 登入器整合完成（Python FastAPI）!
 
 已建立的檔案：
   {APP_DIR}/sso/__init__.py
   {APP_DIR}/sso/config.py
   {APP_DIR}/sso/client.py
   {APP_DIR}/sso/security.py
-  {APP_DIR}/sso/router.py
+  {APP_DIR}/sso/deps.py    — require_auth FastAPI Depends（auth middleware）
+  {APP_DIR}/sso/router.py  — 4 個端點，/me 一行 Depends(require_auth)
   main.py — 已掛上 sso_router
   .env — 已追加 SSO 環境變數
 
 📋 接下來你需要：
 
-1. 請 SSO 管理員在白名單新增你的系統
+1. 確認 SSO Dashboard 的白名單：
    - 網域:{使用者填的 App URL}
    - Redirect URIs 要包含:{使用者填的 App URL}
    取得 app_id / app_secret 後填進 .env
 
-2. 啟動 FastAPI 驗證端點是否活著：
+2. 所有需要登入的 protected endpoint 一律 Depends(require_auth)：
+
+   from fastapi import APIRouter, Depends
+   from {APP_DIR}.sso import require_auth, SsoUser
+
+   router = APIRouter()
+
+   @router.get("/api/assets")
+   async def list_assets(user: SsoUser = Depends(require_auth)):
+       # user 保證已登入；每次呼叫都已向中央 Redis 確認 session
+       return {"viewer": user.email, "assets": []}
+
+3. 需要 role/權限檢查時，在 endpoint 內拿 user 繼續判斷：
+
+   @router.get("/api/reports")
+   async def reports(user: SsoUser = Depends(require_auth)):
+       if not user.email.endswith("@df-recycle.com"):
+           raise HTTPException(status_code=403, detail="forbidden")
+       return {...}
+
+4. 啟動 FastAPI 驗證端點：
    uvicorn {APP_DIR}.main:app --reload --port {使用者填的 Port}
    curl http://localhost:{使用者填的 Port}/api/auth/me  # 應該回 401 no_token
 
-3. 在你的登入頁(React / Vue / Jinja 都可)加上按鈕：
+5. 在你的登入頁（React / Vue / Jinja 都可）加上按鈕：
 
    const SSO_URL = "{使用者填的 SSO URL}";
    const APP_URL = "{使用者填的 App URL}";
@@ -385,14 +454,7 @@ APP_URL={使用者填的 App URL}
 
    <button onClick={() => window.location.href = ssoUrl}>透過 DF-SSO 登入</button>
 
-4. 在需要驗證的頁面呼叫：
-
-   fetch("/api/auth/me", { credentials: "include" })
-     .then(res => res.ok ? res.json() : Promise.reject())
-     .then(data => setUser(data.user))
-     .catch(() => window.location.href = ssoUrl);
-
-5. 登出按鈕：
+6. 登出按鈕：
 
    <a href="/api/auth/logout">登出</a>
 ```
