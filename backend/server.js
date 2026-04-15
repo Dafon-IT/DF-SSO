@@ -1,4 +1,6 @@
 require('dotenv').config();
+// 必須最早 require：patches console.* 以 fan-out 到 Seq
+const logger = require('./config/logger');
 const express = require('express');
 const session = require('express-session');
 const RedisStore = require('connect-redis').default;
@@ -188,7 +190,7 @@ app.use((err, req, res, _next) => {
 // ============================================
 
 const server = app.listen(config.port, () => {
-  console.log(`DF-SSO Backend running on http://localhost:${config.port} [${config.nodeEnv}]`);
+  console.log(`DF-SSO Backend running on http://localhost:${config.port} [${config.nodeEnv}] (Seq: ${logger.isSeqEnabled ? 'on' : 'off'})`);
   // 從 sso_setting 表載入 rate limit 設定覆蓋預設值
   rateLimitManager.reload().then((ok) => {
     if (ok) console.log('Rate limit settings loaded from sso_setting table');
@@ -210,6 +212,8 @@ function gracefulShutdown(signal) {
       redis.disconnect();
       console.log('Redis disconnected');
     } catch { /* ignore */ }
+    // flush 最後一批 log 再離開，避免容器被 SIGTERM 時丟失事件
+    await logger.close();
     process.exit(0);
   });
 

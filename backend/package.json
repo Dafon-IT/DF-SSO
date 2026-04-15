@@ -28,6 +28,7 @@
     "morgan": "^1.10.1",
     "node-pg-migrate": "^8.0.4",
     "pg": "^8.20.0",
+    "seq-logging": "^2.2.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
   },

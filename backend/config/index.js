@@ -65,6 +65,14 @@ const config = {
     account: process.env.ERP_API_ACCOUNT,
     password: process.env.ERP_API_PASSWORD,
   },
+
+  // Seq 結構化日誌（SDK 直推 CLEF，不經過 Docker gelf driver）
+  // 留空即 fallback 僅 console，維持本地開發體驗
+  seq: {
+    ingestionUrl: process.env.SEQ_INGESTION_URL || '',
+    apiKey: process.env.SEQ_API_KEY || '',
+    appName: process.env.APP_NAME || 'df-sso-backend',
+  },
 };
 
 // ============================================

@@ -4,16 +4,17 @@
 # ⚠️ 部署前必讀
 #
 # 1. Seq first-run admin 密碼
-#    seq-input-gelf 用 Coolify magic env `$SERVICE_PASSWORD_SEQ` 自動產生。
+#    用 Coolify magic env `$SERVICE_PASSWORD_SEQ` 自動產生。
 #    部署後到 Coolify → Resource → Environment Variables 查 `SERVICE_PASSWORD_SEQ`
 #    實際值才能登入 Seq UI（帳號：admin）。
 #    密碼只在 volume 初次初始化時寫入；之後要改要進 Seq UI 內改，
 #    改 env 無效。
 #
-# 2. Seq GELF UDP port（prod ↔ test 同一台 Coolify host 時）
-#    Docker daemon 的 gelf driver 必須用 host-level UDP port，
-#    Prod 使用 host port 12101（避開原本的 12201，已被同 host 其他服務或
-#    殘留容器占用）；Test 維持 12202。兩邊不共用 port，互不干擾。
+# 2. Log 架構（v1.1 規範：SDK 直推 CLEF，不再使用 gelf sidecar）
+#    Backend 透過 seq-logging SDK → POST http://seq/api/events/raw
+#    - compose 網路內直接以 service name `seq` 互連（port 80）
+#    - Frontend (Next.js) 目前以 console 輸出走 Docker stdout，已足夠
+#    - 若 `SEQ_INGESTION_URL` 未設，backend logger 會 fallback 純 console
 #
 # 3. Seq volume 殘留損壞
 #    多次部署失敗後 `sso-prod-seq-data` 可能殘留半成品，噴
@@ -53,7 +54,7 @@ services:
 
   # ============================================
   # Seq Server（集中式 log UI）
-  # ⚠️ seq 容器自己用預設 json-file driver，不要掛 gelf（bootstrap deadlock）
+  # ⚠️ 不要對此容器設 healthcheck（datalust/seq 沒裝 curl/wget，會永遠 unhealthy）
   # ============================================
   seq:
     image: datalust/seq:2025.2
@@ -69,27 +70,8 @@ services:
       - sso-seq-data:/data
 
   # ============================================
-  # Seq GELF Input（UDP → Seq HTTP）
-  # ⚠️ 規範例外：必須用 ports publish UDP 到 host，gelf driver 不走 Coolify 反代
-  # ⚠️ Prod 使用 host port 12101（test = 12202），避開 12201 被占用的問題
-  # ============================================
-  seq-input-gelf:
-    image: datalust/seq-input-gelf:latest   # 小工具鏡像，維持 latest 即可
-    restart: unless-stopped
-    depends_on:
-      - seq
-    environment:
-      SEQ_ADDRESS: http://seq
-    ports:
-      - "12101:12201/udp"
-    logging:
-      driver: gelf
-      options:
-        gelf-address: "udp://localhost:12101"
-        tag: "seq-input-gelf"
-
-  # ============================================
   # SSO Backend (Express.js)
+  # log 由應用程式內 seq-logging SDK 直推到 http://seq
   # ============================================
   backend:
     build:
@@ -101,7 +83,7 @@ services:
     depends_on:
       - postgres
       - redis
-      - seq-input-gelf
+      - seq
     environment:
       PORT: 35890
       NODE_ENV: production
@@ -129,12 +111,9 @@ services:
       ERP_API_SEARCH_URL: ${ERP_API_SEARCH_URL}
       ERP_API_ACCOUNT: ${ERP_API_ACCOUNT}
       ERP_API_PASSWORD: ${ERP_API_PASSWORD}
+      SEQ_INGESTION_URL: http://seq
+      APP_NAME: sso-backend-prod
       SERVICE_URL_BACKEND_35890:
-    logging:
-      driver: gelf
-      options:
-        gelf-address: "udp://localhost:12101"
-        tag: "sso-backend-prod"
 
   # ============================================
   # SSO Frontend (Next.js)
@@ -151,15 +130,9 @@ services:
       - "3000"
     depends_on:
       - backend
-      - seq-input-gelf
     environment:
       NODE_ENV: production
       SERVICE_URL_FRONTEND_3000:
-    logging:
-      driver: gelf
-      options:
-        gelf-address: "udp://localhost:12101"
-        tag: "sso-frontend-prod"
 
 volumes:
   sso-postgres-data:
