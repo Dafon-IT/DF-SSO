@@ -533,15 +533,16 @@ function AllowedListPanel() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[960px]">
-              <thead className="bg-gray-50 text-left text-xs text-gray-500 whitespace-nowrap">
+            <table className="w-full text-base min-w-[1400px]">
+              <thead className="bg-gray-50 text-left text-base text-gray-500 whitespace-nowrap">
                 <tr>
-                  <th className="px-4 py-3 font-medium w-20">狀態</th>
-                  <th className="px-4 py-3 font-medium min-w-[140px]">名稱</th>
-                  <th className="px-4 py-3 font-medium min-w-[200px]">網域</th>
-                  <th className="px-4 py-3 font-medium min-w-[180px]">App ID</th>
-                  <th className="px-4 py-3 font-medium min-w-[200px]">Redirect URIs</th>
-                  <th className="px-4 py-3 font-medium min-w-[160px]">操作</th>
+                  <th className="px-5 py-3 font-medium">狀態</th>
+                  <th className="px-5 py-3 font-medium">名稱</th>
+                  <th className="px-5 py-3 font-medium">網域</th>
+                  <th className="px-5 py-3 font-medium">App ID</th>
+                  <th className="px-5 py-3 font-medium">Secret</th>
+                  <th className="px-5 py-3 font-medium">Redirect URIs</th>
+                  <th className="px-5 py-3 font-medium">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -550,103 +551,95 @@ function AllowedListPanel() {
                   return (
                     <Fragment key={item.uid}>
                       <tr className="hover:bg-gray-50/50">
-                        <td className="px-4 py-3">
+                        <td className="px-5 py-3 whitespace-nowrap">
                           <button
                             onClick={() => handleToggleActive(item)}
                             title={item.is_active ? "點擊停用" : "點擊啟用"}
-                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                            className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-base font-medium transition-colors ${
                               item.is_active
                                 ? "bg-green-50 text-green-700 hover:bg-green-100"
                                 : "bg-gray-100 text-gray-500 hover:bg-gray-200"
                             }`}
                           >
-                            <span className={`h-1.5 w-1.5 rounded-full ${item.is_active ? "bg-green-500" : "bg-gray-400"}`} />
+                            <span className={`h-2 w-2 rounded-full ${item.is_active ? "bg-green-500" : "bg-gray-400"}`} />
                             {item.is_active ? "啟用" : "停用"}
                           </button>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-5 py-3 whitespace-nowrap">
                           <div className="font-medium text-gray-900">{item.name || "未命名"}</div>
-                          {item.description && <div className="text-xs text-gray-400 mt-0.5">{item.description}</div>}
+                          {item.description && <div className="text-sm text-gray-400 mt-0.5">{item.description}</div>}
                         </td>
-                        <td className="px-4 py-3">
-                          <code className="text-xs font-mono text-gray-700">{item.domain}</code>
+                        <td className="px-5 py-3 whitespace-nowrap">
+                          <code className="font-mono text-gray-700">{item.domain}</code>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1.5">
-                            <code className="rounded bg-blue-50 px-1.5 py-0.5 text-xs font-mono text-blue-700 select-all">{item.app_id.length > 16 ? `${item.app_id.slice(0, 16)}...` : item.app_id}</code>
-                            <button onClick={() => copyToClipboard(item.app_id)} className="text-gray-300 hover:text-gray-500 transition-colors" title="複製完整 App ID">
-                              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
+                        <td className="px-5 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <code className="rounded bg-blue-50 px-2 py-0.5 font-mono text-blue-700 select-all">{item.app_id}</code>
+                            <button onClick={() => copyToClipboard(item.app_id)} className="text-gray-400 hover:text-gray-600 transition-colors" title="複製">
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
                             </button>
                           </div>
                         </td>
-                        <td className="px-4 py-3">
-                          {item.redirect_uris?.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {item.redirect_uris.slice(0, 2).map((uri, i) => (
-                                <span key={i} className="inline-flex rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">{uri}</span>
-                              ))}
-                              {item.redirect_uris.length > 2 && (
-                                <span className="inline-flex rounded bg-slate-50 px-1.5 py-0.5 text-xs text-slate-400 cursor-help" title={item.redirect_uris.slice(2).join("\n")}>
-                                  +{item.redirect_uris.length - 2}
-                                </span>
-                              )}
+                        <td className="px-5 py-3 whitespace-nowrap">
+                          {creds ? (
+                            <div className="flex items-center gap-2">
+                              <code className="rounded bg-amber-50 border border-amber-200 px-2 py-0.5 font-mono text-gray-800 select-all">
+                                {creds.app_secret.slice(0, 20)}...
+                              </code>
+                              <button onClick={() => copyToClipboard(creds.app_secret)} className="text-amber-500 hover:text-amber-700 transition-colors" title="複製完整 Secret">
+                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
+                              </button>
+                              <button
+                                onClick={() => handleShowCredentials(item)}
+                                className="text-amber-600 hover:text-amber-800 transition-colors"
+                                title="隱藏"
+                              >
+                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" /></svg>
+                              </button>
                             </div>
                           ) : (
-                            <span className="text-xs text-gray-300">-</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-gray-400">••••••••</span>
+                              <button
+                                onClick={() => handleShowCredentials(item)}
+                                className="text-indigo-600 hover:text-indigo-800 transition-colors"
+                                title="顯示"
+                              >
+                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                              </button>
+                            </div>
                           )}
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => handleShowCredentials(item)}
-                              className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-                                creds ? "bg-amber-50 text-amber-700 hover:bg-amber-100" : "text-indigo-600 hover:bg-indigo-50"
-                              }`}
-                            >
-                              {creds ? "隱藏金鑰" : "金鑰"}
-                            </button>
-                            <button onClick={() => handleEdit(item)} className="rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors">
+                        <td className="px-5 py-3">
+                          {item.redirect_uris?.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {item.redirect_uris.map((uri, i) => (
+                                <span key={i} className="inline-flex rounded bg-slate-100 px-2 py-0.5 font-mono text-sm text-slate-700 whitespace-nowrap">{uri}</span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-gray-300">-</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            {creds && (
+                              <button
+                                onClick={() => handleRegenerateSecret(item)}
+                                className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-base font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                              >
+                                重新產生
+                              </button>
+                            )}
+                            <button onClick={() => handleEdit(item)} className="rounded-lg px-3 py-1.5 text-base font-medium text-blue-600 hover:bg-blue-50 transition-colors">
                               編輯
                             </button>
-                            <button onClick={() => handleDelete(item)} className="rounded-md px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors">
+                            <button onClick={() => handleDelete(item)} className="rounded-lg px-3 py-1.5 text-base font-medium text-red-500 hover:bg-red-50 transition-colors">
                               刪除
                             </button>
                           </div>
                         </td>
                       </tr>
-                      {creds && (
-                        <tr>
-                          <td colSpan={6} className="px-4 py-0">
-                            <div className="my-2 rounded-lg bg-amber-50 border border-amber-200 overflow-hidden">
-                              <div className="px-4 py-2 bg-amber-100/50 border-b border-amber-200 flex items-center justify-between">
-                                <span className="text-xs font-semibold text-amber-800">Client Credentials — {item.name || item.domain}</span>
-                                <button
-                                  onClick={() => handleRegenerateSecret(item)}
-                                  className="rounded-md bg-white border border-amber-300 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 transition-colors"
-                                >
-                                  重新產生 Secret
-                                </button>
-                              </div>
-                              <div className="px-4 py-3 space-y-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="w-16 text-xs font-medium text-amber-700">App ID</span>
-                                  <code className="flex-1 rounded bg-white border border-amber-200 px-2.5 py-1 text-xs font-mono text-gray-800 select-all">{creds.app_id}</code>
-                                  <button onClick={() => copyToClipboard(creds.app_id)} className="text-amber-400 hover:text-amber-600 transition-colors" title="複製">
-                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
-                                  </button>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="w-16 text-xs font-medium text-amber-700">Secret</span>
-                                  <code className="flex-1 rounded bg-white border border-amber-200 px-2.5 py-1 text-xs font-mono text-gray-800 select-all break-all">{creds.app_secret}</code>
-                                  <button onClick={() => copyToClipboard(creds.app_secret)} className="text-amber-400 hover:text-amber-600 transition-colors" title="複製">
-                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
                     </Fragment>
                   );
                 })}
