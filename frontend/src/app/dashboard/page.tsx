@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -196,6 +196,10 @@ function AllowedListPanel() {
   const [editItem, setEditItem] = useState<AllowedItem | null>(null);
   const [form, setForm] = useState({ domain: "", name: "", description: "", redirect_uris: "" });
   const [credentialsMap, setCredentialsMap] = useState<Record<string, { app_id: string; app_secret: string }>>({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const comboboxRef = useRef<HTMLDivElement>(null);
 
   const fetchList = useCallback(async () => {
     setLoading(true);
@@ -215,6 +219,49 @@ function AllowedListPanel() {
   useEffect(() => {
     fetchList();
   }, [fetchList]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (comboboxRef.current && !comboboxRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const suggestions = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    const matched: string[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+      for (const val of [item.name, item.domain, item.app_id]) {
+        if (val && val.toLowerCase().includes(q) && !seen.has(val)) {
+          seen.add(val);
+          matched.push(val);
+        }
+      }
+    }
+    return matched.slice(0, 8);
+  }, [items, searchQuery]);
+
+  const filteredItems = useMemo(() => {
+    return items.filter(item => {
+      if (statusFilter === "active" && !item.is_active) return false;
+      if (statusFilter === "inactive" && item.is_active) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          (item.name || "").toLowerCase().includes(q) ||
+          item.domain.toLowerCase().includes(q) ||
+          item.app_id.toLowerCase().includes(q) ||
+          (item.description || "").toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [items, searchQuery, statusFilter]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -353,6 +400,59 @@ function AllowedListPanel() {
         </button>
       </div>
 
+      {/* Search & Filter Bar */}
+      <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-200 flex flex-wrap gap-3 items-end">
+        <div ref={comboboxRef} className="relative flex-1 min-w-[240px]">
+          <label className="block text-sm font-medium text-gray-500 mb-1">搜尋</label>
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setShowSuggestions(true); }}
+              onFocus={() => { if (searchQuery.trim()) setShowSuggestions(true); }}
+              placeholder="搜尋名稱、網域、App ID..."
+              className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          {showSuggestions && suggestions.length > 0 && (
+            <ul className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+              {suggestions.map((s, i) => (
+                <li
+                  key={i}
+                  onClick={() => { setSearchQuery(s); setShowSuggestions(false); }}
+                  className="px-3 py-2 text-sm text-gray-700 cursor-pointer hover:bg-blue-50 hover:text-blue-700"
+                >
+                  {s}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-500 mb-1">狀態</label>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as "all" | "active" | "inactive")}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm w-32 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">全部</option>
+            <option value="active">啟用中</option>
+            <option value="inactive">已停用</option>
+          </select>
+        </div>
+        {(searchQuery || statusFilter !== "all") && (
+          <button
+            onClick={() => { setSearchQuery(""); setStatusFilter("all"); setShowSuggestions(false); }}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+          >
+            清除篩選
+          </button>
+        )}
+      </div>
+
       {/* Form */}
       {showForm && (
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
@@ -420,127 +520,141 @@ function AllowedListPanel() {
         </div>
       )}
 
-      {/* Cards */}
-      {loading ? (
-        <p className="py-12 text-center text-sm text-gray-400">載入中...</p>
-      ) : items.length === 0 ? (
-        <p className="py-12 text-center text-sm text-gray-400">尚無應用程式</p>
-      ) : (
-        <div className="grid gap-4">
-          {items.map((item) => {
-            const creds = credentialsMap[item.uid];
-            return (
-              <div key={item.uid} className="rounded-xl bg-white shadow-sm border border-gray-200 overflow-hidden">
-                {/* Card Header */}
-                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                  <div className="flex items-center gap-3">
-                    <div className={`h-2.5 w-2.5 rounded-full ${item.is_active ? "bg-green-500" : "bg-gray-300"}`} />
-                    <h3 className="font-semibold text-gray-900">{item.name || "未命名應用"}</h3>
-                    {item.description && <span className="text-sm text-gray-400">- {item.description}</span>}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => handleToggleActive(item)}
-                      className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                        item.is_active
-                          ? "bg-green-50 text-green-700 hover:bg-green-100"
-                          : "bg-gray-50 text-gray-500 hover:bg-gray-100"
-                      }`}
-                    >
-                      {item.is_active ? "啟用中" : "已停用"}
-                    </button>
-                    <button onClick={() => handleEdit(item)} className="rounded-md px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors">
-                      編輯
-                    </button>
-                    <button onClick={() => handleDelete(item)} className="rounded-md px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors">
-                      刪除
-                    </button>
-                  </div>
-                </div>
-
-                {/* Card Body */}
-                <div className="px-5 py-4 space-y-3">
-                  {/* Domain */}
-                  <div className="flex items-start gap-2">
-                    <span className="w-24 shrink-0 text-xs font-medium text-gray-400 pt-0.5">Domain</span>
-                    <code className="text-sm text-gray-700 font-mono">{item.domain}</code>
-                  </div>
-
-                  {/* Redirect URIs */}
-                  {item.redirect_uris && item.redirect_uris.length > 0 && (
-                    <div className="flex items-start gap-2">
-                      <span className="w-24 shrink-0 text-xs font-medium text-gray-400 pt-1">Redirect URIs</span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {item.redirect_uris.map((uri, i) => (
-                          <span key={i} className="inline-flex rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">
-                            {uri}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* App ID */}
-                  <div className="flex items-start gap-2">
-                    <span className="w-24 shrink-0 text-xs font-medium text-gray-400 pt-0.5">App ID</span>
-                    <div className="flex items-center gap-2">
-                      <code className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-700 font-mono select-all">{item.app_id}</code>
-                      <button onClick={() => copyToClipboard(item.app_id)} className="text-gray-300 hover:text-gray-500 transition-colors" title="複製">
-                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* App Secret (masked) */}
-                  <div className="flex items-start gap-2">
-                    <span className="w-24 shrink-0 text-xs font-medium text-gray-400 pt-0.5">App Secret</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400 font-mono">{item.app_secret_last4 || "••••••••"}</span>
-                      <button
-                        onClick={() => handleShowCredentials(item)}
-                        className={`text-xs font-medium transition-colors ${creds ? "text-amber-600 hover:text-amber-700" : "text-indigo-600 hover:text-indigo-700"}`}
-                      >
-                        {creds ? "隱藏" : "顯示完整金鑰"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Credentials Panel (revealed) */}
-                {creds && (
-                  <div className="mx-5 mb-4 rounded-lg bg-amber-50 border border-amber-200 overflow-hidden">
-                    <div className="px-4 py-2.5 bg-amber-100/50 border-b border-amber-200 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-amber-800">Client Credentials</span>
-                      <button
-                        onClick={() => handleRegenerateSecret(item)}
-                        className="rounded-md bg-white border border-amber-300 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 transition-colors"
-                      >
-                        重新產生 Secret
-                      </button>
-                    </div>
-                    <div className="px-4 py-3 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="w-20 text-xs font-medium text-amber-700">App ID</span>
-                        <code className="flex-1 rounded bg-white border border-amber-200 px-2.5 py-1 text-xs font-mono text-gray-800 select-all">{creds.app_id}</code>
-                        <button onClick={() => copyToClipboard(creds.app_id)} className="text-amber-400 hover:text-amber-600 transition-colors" title="複製">
-                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-20 text-xs font-medium text-amber-700">Secret</span>
-                        <code className="flex-1 rounded bg-white border border-amber-200 px-2.5 py-1 text-xs font-mono text-gray-800 select-all break-all">{creds.app_secret}</code>
-                        <button onClick={() => copyToClipboard(creds.app_secret)} className="text-amber-400 hover:text-amber-600 transition-colors" title="複製">
-                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+      {/* Table */}
+      <div className="rounded-xl bg-white shadow-sm border border-gray-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 text-sm text-gray-500">
+          共 {filteredItems.length}{filteredItems.length !== items.length ? ` / ${items.length}` : ""} 筆應用
         </div>
-      )}
+        {loading ? (
+          <p className="py-12 text-center text-sm text-gray-400">載入中...</p>
+        ) : filteredItems.length === 0 ? (
+          <p className="py-12 text-center text-sm text-gray-400">
+            {items.length === 0 ? "尚無應用程式" : "無符合條件的應用"}
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left text-xs text-gray-500">
+                <tr>
+                  <th className="px-4 py-3 font-medium">狀態</th>
+                  <th className="px-4 py-3 font-medium">名稱</th>
+                  <th className="px-4 py-3 font-medium">網域</th>
+                  <th className="px-4 py-3 font-medium">App ID</th>
+                  <th className="px-4 py-3 font-medium">Redirect URIs</th>
+                  <th className="px-4 py-3 font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filteredItems.map((item) => {
+                  const creds = credentialsMap[item.uid];
+                  return (
+                    <Fragment key={item.uid}>
+                      <tr className="hover:bg-gray-50/50">
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => handleToggleActive(item)}
+                            title={item.is_active ? "點擊停用" : "點擊啟用"}
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                              item.is_active
+                                ? "bg-green-50 text-green-700 hover:bg-green-100"
+                                : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                            }`}
+                          >
+                            <span className={`h-1.5 w-1.5 rounded-full ${item.is_active ? "bg-green-500" : "bg-gray-400"}`} />
+                            {item.is_active ? "啟用" : "停用"}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-gray-900">{item.name || "未命名"}</div>
+                          {item.description && <div className="text-xs text-gray-400 mt-0.5">{item.description}</div>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <code className="text-xs font-mono text-gray-700">{item.domain}</code>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1.5">
+                            <code className="rounded bg-blue-50 px-1.5 py-0.5 text-xs font-mono text-blue-700 select-all">{item.app_id.length > 16 ? `${item.app_id.slice(0, 16)}...` : item.app_id}</code>
+                            <button onClick={() => copyToClipboard(item.app_id)} className="text-gray-300 hover:text-gray-500 transition-colors" title="複製完整 App ID">
+                              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          {item.redirect_uris?.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {item.redirect_uris.slice(0, 2).map((uri, i) => (
+                                <span key={i} className="inline-flex rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">{uri}</span>
+                              ))}
+                              {item.redirect_uris.length > 2 && (
+                                <span className="inline-flex rounded bg-slate-50 px-1.5 py-0.5 text-xs text-slate-400 cursor-help" title={item.redirect_uris.slice(2).join("\n")}>
+                                  +{item.redirect_uris.length - 2}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-300">-</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleShowCredentials(item)}
+                              className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+                                creds ? "bg-amber-50 text-amber-700 hover:bg-amber-100" : "text-indigo-600 hover:bg-indigo-50"
+                              }`}
+                            >
+                              {creds ? "隱藏金鑰" : "金鑰"}
+                            </button>
+                            <button onClick={() => handleEdit(item)} className="rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors">
+                              編輯
+                            </button>
+                            <button onClick={() => handleDelete(item)} className="rounded-md px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors">
+                              刪除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {creds && (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-0">
+                            <div className="my-2 rounded-lg bg-amber-50 border border-amber-200 overflow-hidden">
+                              <div className="px-4 py-2 bg-amber-100/50 border-b border-amber-200 flex items-center justify-between">
+                                <span className="text-xs font-semibold text-amber-800">Client Credentials — {item.name || item.domain}</span>
+                                <button
+                                  onClick={() => handleRegenerateSecret(item)}
+                                  className="rounded-md bg-white border border-amber-300 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 transition-colors"
+                                >
+                                  重新產生 Secret
+                                </button>
+                              </div>
+                              <div className="px-4 py-3 space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-16 text-xs font-medium text-amber-700">App ID</span>
+                                  <code className="flex-1 rounded bg-white border border-amber-200 px-2.5 py-1 text-xs font-mono text-gray-800 select-all">{creds.app_id}</code>
+                                  <button onClick={() => copyToClipboard(creds.app_id)} className="text-amber-400 hover:text-amber-600 transition-colors" title="複製">
+                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
+                                  </button>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="w-16 text-xs font-medium text-amber-700">Secret</span>
+                                  <code className="flex-1 rounded bg-white border border-amber-200 px-2.5 py-1 text-xs font-mono text-gray-800 select-all break-all">{creds.app_secret}</code>
+                                  <button onClick={() => copyToClipboard(creds.app_secret)} className="text-amber-400 hover:text-amber-600 transition-colors" title="複製">
+                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
