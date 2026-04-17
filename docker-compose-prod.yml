@@ -134,6 +134,23 @@ services:
       NODE_ENV: production
       SERVICE_URL_FRONTEND_3000:
 
+  # ============================================
+  # Adminer（暫時啟用，資料查完後請移除對外連結）
+  # ⚠️ 正式環境原則上不保留此服務，使用後請盡速移除 FQDN 並刪除此 block
+  # ============================================
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    expose:
+      - "8080"
+    depends_on:
+      - postgres
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DEFAULT_DB_DRIVER: pgsql
+      ADMINER_DESIGN: dracula
+      SERVICE_URL_ADMINER_8080:
+
 volumes:
   sso-postgres-data:
     name: sso-prod-postgres-data
