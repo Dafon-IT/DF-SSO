@@ -1,6 +1,6 @@
-const crypto = require('crypto');
+import crypto from 'crypto';
 
-exports.up = (pgm) => {
+export const up = (pgm) => {
   // 新增 OAuth2 Client 欄位
   pgm.addColumns('sso_allowed_list', {
     app_id: { type: 'uuid', default: pgm.func('uuidv7()'), unique: true, notNull: true },
@@ -17,6 +17,6 @@ exports.up = (pgm) => {
   `);
 };
 
-exports.down = (pgm) => {
+export const down = (pgm) => {
   pgm.dropColumns('sso_allowed_list', ['app_id', 'app_secret', 'redirect_uris']);
 };

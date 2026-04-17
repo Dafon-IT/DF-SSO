@@ -1,7 +1,7 @@
-const jwt = require('jsonwebtoken');
-const config = require('../config');
-const redis = require('../config/redis');
-const adminManager = require('../services/adminManager');
+import jwt from 'jsonwebtoken';
+import config from '../config/index.js';
+import redis from '../config/redis.js';
+import adminManager from '../services/adminManager.js';
 
 const SESSION_PREFIX = 'sso:session:';
 
@@ -49,4 +49,4 @@ async function adminAuth(req, res, next) {
   }
 }
 
-module.exports = adminAuth;
+export default adminAuth;

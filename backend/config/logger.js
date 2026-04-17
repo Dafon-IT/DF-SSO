@@ -7,9 +7,9 @@
  * - 另外 export 了 `logger.info/warn/error` 的 message template 介面，
  *   新程式碼建議用這個寫法以取得可 filter 的 properties（參見 Coolify-Docker-Compose-Spec-v1.1）。
  *
- * 此模組必須在 server.js 最上方 require，越早 patch 越好。
+ * 此模組必須在 server.js 最上方 import，越早 patch 越好。
  */
-const config = require('./index');
+import config from './index.js';
 
 const originalConsole = {
   log: console.log.bind(console),
@@ -23,7 +23,7 @@ let seqLogger = null;
 
 if (config.seq.ingestionUrl) {
   try {
-    const { Logger } = require('seq-logging');
+    const { Logger } = await import('seq-logging');
     seqLogger = new Logger({
       serverUrl: config.seq.ingestionUrl,
       apiKey: config.seq.apiKey || undefined,
@@ -137,4 +137,4 @@ const logger = {
   },
 };
 
-module.exports = logger;
+export default logger;

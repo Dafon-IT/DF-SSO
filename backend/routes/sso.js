@@ -1,9 +1,9 @@
-const express = require('express');
-const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
-const config = require('../config');
-const redis = require('../config/redis');
-const allowedListService = require('../services/allowedList');
+import express from 'express';
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import config from '../config/index.js';
+import redis from '../config/redis.js';
+import allowedListService from '../services/allowedList.js';
 
 const router = express.Router();
 
@@ -236,4 +236,4 @@ router.get('/logout', async (req, res) => {
   res.redirect(safeRedirect);
 });
 
-module.exports = router;
+export default router;

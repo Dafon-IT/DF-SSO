@@ -1,5 +1,6 @@
-const express = require('express');
-const allowedListService = require('../services/allowedList');
+import express from 'express';
+import allowedListService from '../services/allowedList.js';
+import db from '../config/database.js';
 
 const router = express.Router();
 
@@ -148,7 +149,7 @@ router.put('/:uid', async (req, res) => {
  */
 router.get('/:uid/credentials', async (req, res) => {
   try {
-    const { rows } = await require('../config/database').query(
+    const { rows } = await db.query(
       'SELECT app_id, app_secret FROM sso_allowed_list WHERE uid = $1 AND is_deleted = FALSE',
       [req.params.uid]
     );
@@ -196,4 +197,4 @@ router.delete('/:uid', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

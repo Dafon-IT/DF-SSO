@@ -1,13 +1,13 @@
-const express = require('express');
-const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
-const config = require('../config');
-const redis = require('../config/redis');
-const { cca } = require('../config/msal');
-const loginLogService = require('../services/loginLog');
-const erpApi = require('../services/erpApi');
-const allowedListService = require('../services/allowedList');
-const adminManager = require('../services/adminManager');
+import express from 'express';
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import config from '../config/index.js';
+import redis from '../config/redis.js';
+import { cca } from '../config/msal.js';
+import loginLogService from '../services/loginLog.js';
+import erpApi from '../services/erpApi.js';
+import allowedListService from '../services/allowedList.js';
+import adminManager from '../services/adminManager.js';
 
 const router = express.Router();
 
@@ -355,4 +355,4 @@ router.post('/logout', async (req, res) => {
   res.json({ message: 'Logged out' });
 });
 
-module.exports = router;
+export default router;

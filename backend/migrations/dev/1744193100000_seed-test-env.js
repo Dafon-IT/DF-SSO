@@ -1,6 +1,6 @@
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
-exports.up = (pgm) => {
+export const up = (pgm) => {
   pgm.sql(`
     INSERT INTO sso_allowed_list (domain, name, env, description)
     VALUES
@@ -9,6 +9,6 @@ exports.up = (pgm) => {
   `);
 };
 
-exports.down = () => {
+export const down = () => {
   // management domain 為必要資料，不刪除
 };

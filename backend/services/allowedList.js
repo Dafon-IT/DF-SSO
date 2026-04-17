@@ -1,5 +1,5 @@
-const crypto = require('crypto');
-const db = require('../config/database');
+import crypto from 'crypto';
+import db from '../config/database.js';
 
 /**
  * 從 row 中移除 app_secret，僅保留末 4 碼供辨識
@@ -204,7 +204,7 @@ async function getAllAppsForBackChannel() {
   return result;
 }
 
-module.exports = {
+export default {
   findAll, findByUid, findByAppId, findByName,
   create, update, regenerateSecret, remove,
   isDomainAllowed, getAllOrigins, getAllAppsForBackChannel,

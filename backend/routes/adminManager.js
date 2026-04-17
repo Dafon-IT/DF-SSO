@@ -1,5 +1,5 @@
-const express = require('express');
-const adminManagerService = require('../services/adminManager');
+import express from 'express';
+import adminManagerService from '../services/adminManager.js';
 
 const router = express.Router();
 
@@ -117,4 +117,4 @@ router.delete('/:uid', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

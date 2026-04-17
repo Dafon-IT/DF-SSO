@@ -8,10 +8,10 @@
  */
 
 /** @type {import('node-pg-migrate').ColumnDefinitions | undefined} */
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.up = (pgm) => {
+export const up = (pgm) => {
   // --- sso_login_log ---
   pgm.alterColumn('sso_login_log', 'created_at', {
     type: 'timestamptz',
@@ -57,7 +57,7 @@ exports.up = (pgm) => {
 };
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.down = (pgm) => {
+export const down = (pgm) => {
   // --- sso_login_log ---
   pgm.alterColumn('sso_login_log', 'created_at', {
     type: 'timestamp',

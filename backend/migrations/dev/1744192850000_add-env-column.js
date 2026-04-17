@@ -1,6 +1,6 @@
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
-exports.up = (pgm) => {
+export const up = (pgm) => {
   pgm.addColumn('sso_allowed_list', {
     env: {
       type: 'varchar(20)',
@@ -16,6 +16,6 @@ exports.up = (pgm) => {
   `);
 };
 
-exports.down = (pgm) => {
+export const down = (pgm) => {
   pgm.dropColumn('sso_allowed_list', 'env');
 };

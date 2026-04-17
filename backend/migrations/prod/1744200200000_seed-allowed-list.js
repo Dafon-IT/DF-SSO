@@ -9,12 +9,12 @@
  */
 
 /** @type {import('node-pg-migrate').ColumnDefinitions | undefined} */
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
 const PROD_MANAGEMENT_ORIGIN = 'https://df-sso-management.apps.zerozero.tw';
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.up = (pgm) => {
+export const up = (pgm) => {
   pgm.sql(`
     INSERT INTO sso_allowed_list (domain, name, description, app_secret, redirect_uris)
     VALUES (
@@ -29,6 +29,6 @@ exports.up = (pgm) => {
 };
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.down = () => {
+export const down = () => {
   // management domain 為系統必要資料，不可刪除
 };

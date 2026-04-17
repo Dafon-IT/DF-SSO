@@ -5,16 +5,16 @@
  */
 
 /** @type {import('node-pg-migrate').ColumnDefinitions | undefined} */
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.up = (pgm) => {
+export const up = (pgm) => {
   pgm.addColumn('sso_admin_manager', {
     is_newer: { type: 'boolean', notNull: true, default: false },
   });
 };
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.down = (pgm) => {
+export const down = (pgm) => {
   pgm.dropColumn('sso_admin_manager', 'is_newer');
 };

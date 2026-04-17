@@ -1,4 +1,4 @@
-const db = require('../config/database');
+import db from '../config/database.js';
 
 /**
  * 檢查 email 是否為管理員（啟用中且未刪除）
@@ -114,4 +114,4 @@ async function remove(uid) {
   return rows[0] || null;
 }
 
-module.exports = { isAdmin, isAdminByOidOrEmail, activateIfNewer, findAll, findByUid, create, update, remove };
+export default { isAdmin, isAdminByOidOrEmail, activateIfNewer, findAll, findByUid, create, update, remove };

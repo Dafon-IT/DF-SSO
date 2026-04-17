@@ -2,6 +2,7 @@
   "name": "df-sso-backend",
   "version": "1.0.0",
   "description": "DF SSO Backend - Microsoft Azure AD Login",
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

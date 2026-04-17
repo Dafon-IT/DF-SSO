@@ -533,15 +533,15 @@ function AllowedListPanel() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-xs text-gray-500">
+            <table className="w-full text-sm min-w-[960px]">
+              <thead className="bg-gray-50 text-left text-xs text-gray-500 whitespace-nowrap">
                 <tr>
-                  <th className="px-4 py-3 font-medium">狀態</th>
-                  <th className="px-4 py-3 font-medium">名稱</th>
-                  <th className="px-4 py-3 font-medium">網域</th>
-                  <th className="px-4 py-3 font-medium">App ID</th>
-                  <th className="px-4 py-3 font-medium">Redirect URIs</th>
-                  <th className="px-4 py-3 font-medium">操作</th>
+                  <th className="px-4 py-3 font-medium w-20">狀態</th>
+                  <th className="px-4 py-3 font-medium min-w-[140px]">名稱</th>
+                  <th className="px-4 py-3 font-medium min-w-[200px]">網域</th>
+                  <th className="px-4 py-3 font-medium min-w-[180px]">App ID</th>
+                  <th className="px-4 py-3 font-medium min-w-[200px]">Redirect URIs</th>
+                  <th className="px-4 py-3 font-medium min-w-[160px]">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">

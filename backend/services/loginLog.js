@@ -1,4 +1,4 @@
-const db = require('../config/database');
+import db from '../config/database.js';
 
 /**
  * 新增登入紀錄
@@ -80,4 +80,4 @@ async function search({ email, status, startDate, endDate, page = 1, pageSize = 
   };
 }
 
-module.exports = { create, search };
+export default { create, search };

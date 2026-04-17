@@ -1,4 +1,4 @@
-const config = require('../config');
+import config from '../config/index.js';
 
 let cachedToken = null;
 let tokenExpiresAt = 0;
@@ -66,4 +66,4 @@ async function searchByEmail(email) {
   return matched || null;
 }
 
-module.exports = { searchByEmail };
+export default { searchByEmail };

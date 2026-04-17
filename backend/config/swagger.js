@@ -1,4 +1,4 @@
-const config = require('./index');
+import config from './index.js';
 
 const swaggerSpec = {
   openapi: '3.0.3',
@@ -831,4 +831,4 @@ const swaggerSpec = {
   },
 };
 
-module.exports = swaggerSpec;
+export default swaggerSpec;

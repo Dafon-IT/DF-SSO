@@ -1,5 +1,5 @@
-const msal = require('@azure/msal-node');
-const config = require('./index');
+import * as msal from '@azure/msal-node';
+import config from './index.js';
 
 const msalConfig = {
   auth: {
@@ -22,4 +22,4 @@ const msalConfig = {
 
 const cca = new msal.ConfidentialClientApplication(msalConfig);
 
-module.exports = { cca };
+export { cca };

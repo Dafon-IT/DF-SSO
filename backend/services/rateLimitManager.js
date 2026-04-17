@@ -9,8 +9,8 @@
  * 注意：重建會清掉舊 instance 的計數（視窗歸零），這是預期行為。
  */
 
-const rateLimit = require('express-rate-limit');
-const ssoSettingService = require('./ssoSetting');
+import rateLimit from 'express-rate-limit';
+import ssoSettingService from './ssoSetting.js';
 
 const DEFAULTS = {
   'rate_limit.global':   { windowMs: 15 * 60 * 1000, max: 500 },
@@ -88,7 +88,7 @@ const authLimiter     = (req, res, next) => current.auth(req, res, next);
 const sessionLimiter  = (req, res, next) => current.session(req, res, next);
 const exchangeLimiter = (req, res, next) => current.exchange(req, res, next);
 
-module.exports = {
+export default {
   reload,
   globalLimiter,
   authLimiter,

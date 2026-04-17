@@ -9,10 +9,10 @@
  */
 
 /** @type {import('node-pg-migrate').ColumnDefinitions | undefined} */
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.up = (pgm) => {
+export const up = (pgm) => {
   pgm.createTable('sso_setting', {
     ppid: { type: 'serial', primaryKey: true },
     key: { type: 'varchar(128)', notNull: true, unique: true },
@@ -44,6 +44,6 @@ exports.up = (pgm) => {
 };
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.down = (pgm) => {
+export const down = (pgm) => {
   pgm.dropTable('sso_setting');
 };

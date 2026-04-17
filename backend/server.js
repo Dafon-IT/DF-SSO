@@ -1,29 +1,29 @@
-require('dotenv').config();
-// 必須最早 require：patches console.* 以 fan-out 到 Seq
-const logger = require('./config/logger');
-const express = require('express');
-const session = require('express-session');
-const RedisStore = require('connect-redis').default;
-const cors = require('cors');
-const cookieParser = require('cookie-parser');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const swaggerUi = require('swagger-ui-express');
-const config = require('./config');
-const swaggerSpec = require('./config/swagger');
-const authRoutes = require('./routes/auth');
-const ssoRoutes = require('./routes/sso');
-const allowedListRoutes = require('./routes/allowedList');
-const loginLogRoutes = require('./routes/loginLog');
-const adminManagerRoutes = require('./routes/adminManager');
-const ssoSettingRoutes = require('./routes/ssoSetting');
-const allowedListService = require('./services/allowedList');
-const rateLimitManager = require('./services/rateLimitManager');
-const adminAuth = require('./middleware/adminAuth');
+import 'dotenv/config';
+// 必須最早 import：patches console.* 以 fan-out 到 Seq
+import logger from './config/logger.js';
+import express from 'express';
+import session from 'express-session';
+import RedisStore from 'connect-redis';
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import swaggerUi from 'swagger-ui-express';
+import config from './config/index.js';
+import swaggerSpec from './config/swagger.js';
+import authRoutes from './routes/auth.js';
+import ssoRoutes from './routes/sso.js';
+import allowedListRoutes from './routes/allowedList.js';
+import loginLogRoutes from './routes/loginLog.js';
+import adminManagerRoutes from './routes/adminManager.js';
+import ssoSettingRoutes from './routes/ssoSetting.js';
+import allowedListService from './services/allowedList.js';
+import rateLimitManager from './services/rateLimitManager.js';
+import adminAuth from './middleware/adminAuth.js';
 
 // 初始化連線
-const db = require('./config/database');
-const redis = require('./config/redis');
+import db from './config/database.js';
+import redis from './config/redis.js';
 
 const app = express();
 

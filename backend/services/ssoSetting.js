@@ -1,4 +1,4 @@
-const db = require('../config/database');
+import db from '../config/database.js';
 
 async function findAll() {
   const { rows } = await db.query(
@@ -43,7 +43,7 @@ async function getMapByCategory(category) {
   return map;
 }
 
-module.exports = {
+export default {
   findAll,
   findByCategory,
   findByKey,

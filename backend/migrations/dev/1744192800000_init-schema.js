@@ -1,12 +1,12 @@
 /**
  * @type {import('node-pg-migrate').ColumnDefinitions | undefined}
  */
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
 /**
  * @param pgm {import('node-pg-migrate').MigrationBuilder}
  */
-exports.up = (pgm) => {
+export const up = (pgm) => {
   // pgcrypto extension
   pgm.sql('CREATE EXTENSION IF NOT EXISTS pgcrypto');
 
@@ -104,7 +104,7 @@ exports.up = (pgm) => {
 /**
  * @param pgm {import('node-pg-migrate').MigrationBuilder}
  */
-exports.down = (pgm) => {
+export const down = (pgm) => {
   pgm.dropTable('sso_allowed_list');
   pgm.dropTable('sso_login_log');
   pgm.sql('DROP FUNCTION IF EXISTS update_updated_at()');

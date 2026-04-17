@@ -3,13 +3,13 @@
  * 原因：每個環境獨立部署一套 SSO，不再需要在 DB 層區分環境
  */
 
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
-exports.up = (pgm) => {
+export const up = (pgm) => {
   pgm.dropColumn('sso_allowed_list', 'env');
 };
 
-exports.down = (pgm) => {
+export const down = (pgm) => {
   pgm.addColumn('sso_allowed_list', {
     env: {
       type: 'varchar(20)',

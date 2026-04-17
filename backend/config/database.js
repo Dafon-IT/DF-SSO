@@ -1,5 +1,7 @@
-const { Pool } = require('pg');
-const config = require('./index');
+import pg from 'pg';
+import config from './index.js';
+
+const { Pool } = pg;
 
 const pool = new Pool({
   host: config.pg.host,
@@ -22,4 +24,4 @@ pool.on('error', (err) => {
   console.error('[PostgreSQL] Unexpected error:', err.message);
 });
 
-module.exports = pool;
+export default pool;

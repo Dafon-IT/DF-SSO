@@ -1,5 +1,5 @@
-const Redis = require('ioredis');
-const config = require('./index');
+import Redis from 'ioredis';
+import config from './index.js';
 
 const redis = new Redis({
   host: config.redis.host,
@@ -19,4 +19,4 @@ redis.on('error', (err) => {
   console.error('[Redis] Error:', err.message);
 });
 
-module.exports = redis;
+export default redis;

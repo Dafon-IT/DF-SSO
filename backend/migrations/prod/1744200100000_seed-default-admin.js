@@ -6,10 +6,10 @@
  */
 
 /** @type {import('node-pg-migrate').ColumnDefinitions | undefined} */
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.up = (pgm) => {
+export const up = (pgm) => {
   pgm.sql(`
     INSERT INTO sso_admin_manager (azure_oid, email, name, is_active, is_newer)
     VALUES (
@@ -24,6 +24,6 @@ exports.up = (pgm) => {
 };
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.down = () => {
+export const down = () => {
   // 預設管理員為系統關鍵資料，不可刪除（避免部署回滾後無人能登入後台）
 };

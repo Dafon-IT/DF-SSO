@@ -4,10 +4,10 @@
  */
 
 /** @type {import('node-pg-migrate').ColumnDefinitions | undefined} */
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.up = (pgm) => {
+export const up = (pgm) => {
   pgm.createTable('sso_admin_manager', {
     ppid: { type: 'serial', primaryKey: true },
     uid: { type: 'uuid', notNull: true, default: pgm.func('uuidv7()') },
@@ -42,6 +42,6 @@ exports.up = (pgm) => {
 };
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.down = (pgm) => {
+export const down = (pgm) => {
   pgm.dropTable('sso_admin_manager');
 };

@@ -1,6 +1,6 @@
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
-exports.up = (pgm) => {
+export const up = (pgm) => {
   pgm.sql(`
     INSERT INTO sso_allowed_list (domain, name, env, description)
     VALUES
@@ -11,7 +11,7 @@ exports.up = (pgm) => {
   `);
 };
 
-exports.down = (pgm) => {
+export const down = (pgm) => {
   pgm.sql(`
     DELETE FROM sso_allowed_list WHERE domain IN ('http://localhost:3000', 'http://localhost:3100', 'http://localhost:3200')
   `);

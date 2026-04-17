@@ -1,6 +1,6 @@
-const express = require('express');
-const ssoSettingService = require('../services/ssoSetting');
-const rateLimitManager = require('../services/rateLimitManager');
+import express from 'express';
+import ssoSettingService from '../services/ssoSetting.js';
+import rateLimitManager from '../services/rateLimitManager.js';
 
 const router = express.Router();
 
@@ -96,4 +96,4 @@ router.put('/:key', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

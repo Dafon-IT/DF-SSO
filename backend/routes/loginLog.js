@@ -1,5 +1,5 @@
-const express = require('express');
-const loginLogService = require('../services/loginLog');
+import express from 'express';
+import loginLogService from '../services/loginLog.js';
 
 const router = express.Router();
 
@@ -26,4 +26,4 @@ router.get('/', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

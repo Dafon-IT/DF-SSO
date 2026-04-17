@@ -12,10 +12,10 @@
  */
 
 /** @type {import('node-pg-migrate').ColumnDefinitions | undefined} */
-exports.shorthands = undefined;
+export const shorthands = undefined;
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.up = (pgm) => {
+export const up = (pgm) => {
   // ============================================
   // Extensions & helper functions
   // ============================================
@@ -147,7 +147,7 @@ exports.up = (pgm) => {
 };
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
-exports.down = (pgm) => {
+export const down = (pgm) => {
   pgm.dropTable('sso_admin_manager');
   pgm.dropTable('sso_allowed_list');
   pgm.dropTable('sso_login_log');
