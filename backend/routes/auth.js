@@ -113,7 +113,7 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
     return res.redirect(`${config.frontendUrl}?error=token_exchange_failed`);
   }
 
-  const email = claims.email || claims.preferred_username;
+  const email = (claims.email || claims.preferred_username || '').toLowerCase().trim();
 
   // 白名單驗證：FRONTEND_URL 必須在 sso_allowed_list 中
   try {
