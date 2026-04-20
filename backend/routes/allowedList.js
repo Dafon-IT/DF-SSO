@@ -41,7 +41,7 @@ router.get('/:uid', async (req, res) => {
  */
 router.post('/', async (req, res) => {
   try {
-    const { domain, name, description, redirect_uris } = req.body;
+    const { domain, name, description, redirect_uris, frontend_url, backend_docs_url } = req.body;
     if (!domain) {
       return res.status(400).json({ success: false, error: 'domain is required' });
     }
@@ -73,11 +73,26 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // 驗證 frontend_url / backend_docs_url（若有提供）
+    for (const [field, value] of [['frontend_url', frontend_url], ['backend_docs_url', backend_docs_url]]) {
+      if (value === undefined || value === null || value === '') continue;
+      try {
+        const u = new URL(value);
+        if (!['http:', 'https:'].includes(u.protocol)) {
+          return res.status(400).json({ success: false, error: `${field} must use http or https protocol` });
+        }
+      } catch {
+        return res.status(400).json({ success: false, error: `${field} must be a valid URL` });
+      }
+    }
+
     const item = await allowedListService.create({
       domain,
       name,
       description,
       redirectUris: redirect_uris,
+      frontendUrl: frontend_url,
+      backendDocsUrl: backend_docs_url,
     });
     res.status(201).json({ success: true, data: item });
   } catch (error) {
@@ -95,7 +110,7 @@ router.post('/', async (req, res) => {
  */
 router.put('/:uid', async (req, res) => {
   try {
-    const { domain, name, description, is_active, redirect_uris } = req.body;
+    const { domain, name, description, is_active, redirect_uris, frontend_url, backend_docs_url } = req.body;
 
     // 若有提供 domain，驗證是否為合法 URL
     if (domain !== undefined) {
@@ -126,12 +141,27 @@ router.put('/:uid', async (req, res) => {
       }
     }
 
+    // 驗證 frontend_url / backend_docs_url（若有提供且非空字串）
+    for (const [field, value] of [['frontend_url', frontend_url], ['backend_docs_url', backend_docs_url]]) {
+      if (value === undefined || value === null || value === '') continue;
+      try {
+        const u = new URL(value);
+        if (!['http:', 'https:'].includes(u.protocol)) {
+          return res.status(400).json({ success: false, error: `${field} must use http or https protocol` });
+        }
+      } catch {
+        return res.status(400).json({ success: false, error: `${field} must be a valid URL` });
+      }
+    }
+
     const item = await allowedListService.update(req.params.uid, {
       domain,
       name,
       description,
       isActive: is_active,
       redirectUris: redirect_uris,
+      frontendUrl: frontend_url,
+      backendDocsUrl: backend_docs_url,
     });
     if (!item) {
       return res.status(404).json({ success: false, error: 'Not found' });

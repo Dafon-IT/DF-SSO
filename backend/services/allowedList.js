@@ -60,7 +60,7 @@ async function findByName(name) {
  * 新增白名單（自動產生 app_id + app_secret）
  * 若 domain 已存在且 is_deleted = TRUE，則恢復該筆資料並重新產生 credentials
  */
-async function create({ domain, name, description, redirectUris }) {
+async function create({ domain, name, description, redirectUris, frontendUrl, backendDocsUrl }) {
   const appSecret = crypto.randomBytes(32).toString('hex');
   const uris = redirectUris && redirectUris.length > 0 ? redirectUris : [domain];
 
@@ -74,19 +74,20 @@ async function create({ domain, name, description, redirectUris }) {
     const { rows } = await db.query(
       `UPDATE sso_allowed_list
        SET is_deleted = FALSE, is_active = TRUE, name = $2, description = $3,
-           app_secret = $4, redirect_uris = $5
+           app_secret = $4, redirect_uris = $5,
+           frontend_url = $6, backend_docs_url = $7
        WHERE ppid = $1
        RETURNING *`,
-      [deleted[0].ppid, name, description, appSecret, uris]
+      [deleted[0].ppid, name, description, appSecret, uris, frontendUrl ?? null, backendDocsUrl ?? null]
     );
     return rows[0];
   }
 
   const { rows } = await db.query(
-    `INSERT INTO sso_allowed_list (domain, name, description, app_secret, redirect_uris)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO sso_allowed_list (domain, name, description, app_secret, redirect_uris, frontend_url, backend_docs_url)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
-    [domain, name, description, appSecret, uris]
+    [domain, name, description, appSecret, uris, frontendUrl ?? null, backendDocsUrl ?? null]
   );
   return rows[0];
 }
@@ -94,7 +95,7 @@ async function create({ domain, name, description, redirectUris }) {
 /**
  * 更新白名單
  */
-async function update(uid, { domain, name, description, isActive, redirectUris }) {
+async function update(uid, { domain, name, description, isActive, redirectUris, frontendUrl, backendDocsUrl }) {
   const fields = [];
   const params = [];
   let paramIndex = 1;
@@ -118,6 +119,14 @@ async function update(uid, { domain, name, description, isActive, redirectUris }
   if (redirectUris !== undefined) {
     fields.push(`redirect_uris = $${paramIndex++}`);
     params.push(redirectUris);
+  }
+  if (frontendUrl !== undefined) {
+    fields.push(`frontend_url = $${paramIndex++}`);
+    params.push(frontendUrl || null);
+  }
+  if (backendDocsUrl !== undefined) {
+    fields.push(`backend_docs_url = $${paramIndex++}`);
+    params.push(backendDocsUrl || null);
   }
 
   if (fields.length === 0) return findByUid(uid);

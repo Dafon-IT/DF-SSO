@@ -32,6 +32,8 @@ interface AllowedItem {
   app_id: string;
   app_secret_last4: string | null;
   redirect_uris: string[];
+  frontend_url: string | null;
+  backend_docs_url: string | null;
   is_active: boolean;
   is_deleted: boolean;
   created_at: string;
@@ -198,7 +200,7 @@ function AllowedListPanel() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState<AllowedItem | null>(null);
-  const [form, setForm] = useState({ domain: "", name: "", description: "", redirect_uris: "" });
+  const [form, setForm] = useState({ domain: "", name: "", description: "", redirect_uris: "", frontend_url: "", backend_docs_url: "" });
   const [credentialsMap, setCredentialsMap] = useState<Record<string, { app_id: string; app_secret: string }>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -278,6 +280,8 @@ function AllowedListPanel() {
       domain: form.domain,
       name: form.name,
       description: form.description,
+      frontend_url: form.frontend_url.trim() || null,
+      backend_docs_url: form.backend_docs_url.trim() || null,
     };
     const uris = form.redirect_uris
       .split("\n")
@@ -295,7 +299,7 @@ function AllowedListPanel() {
     if (data.success) {
       setShowForm(false);
       setEditItem(null);
-      setForm({ domain: "", name: "", description: "", redirect_uris: "" });
+      setForm({ domain: "", name: "", description: "", redirect_uris: "", frontend_url: "", backend_docs_url: "" });
       fetchList();
     } else {
       await dialog.alert({ type: "error", title: "操作失敗", message: data.error });
@@ -309,6 +313,8 @@ function AllowedListPanel() {
       name: item.name || "",
       description: item.description || "",
       redirect_uris: (item.redirect_uris || []).join("\n"),
+      frontend_url: item.frontend_url || "",
+      backend_docs_url: item.backend_docs_url || "",
     });
     setShowForm(true);
   };
@@ -340,7 +346,7 @@ function AllowedListPanel() {
 
   const handleAdd = () => {
     setEditItem(null);
-    setForm({ domain: "", name: "", description: "", redirect_uris: "" });
+    setForm({ domain: "", name: "", description: "", redirect_uris: "", frontend_url: "", backend_docs_url: "" });
     setShowForm(true);
   };
 
@@ -524,6 +530,30 @@ function AllowedListPanel() {
               />
               <p className="mt-1 text-xs text-foreground-muted">每行一個 origin（dev / test / prod），最多 10 筆</p>
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Frontend URL（首頁）</label>
+                <input
+                  type="text"
+                  value={form.frontend_url}
+                  onChange={(e) => setForm({ ...form, frontend_url: e.target.value })}
+                  placeholder="https://crm.df-recycle.com.tw"
+                  className="w-full rounded-xl border border-border px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-foreground-muted">DevOps 快速測試用，可空白</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Backend Docs URL（API 文件）</label>
+                <input
+                  type="text"
+                  value={form.backend_docs_url}
+                  onChange={(e) => setForm({ ...form, backend_docs_url: e.target.value })}
+                  placeholder="https://api.df-recycle.com.tw/swagger"
+                  className="w-full rounded-xl border border-border px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-foreground-muted">Swagger / OpenAPI 文件，可空白</p>
+              </div>
+            </div>
             <div className="flex gap-2 pt-1">
               <button type="submit" className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700">
                 {editItem ? "儲存變更" : "建立應用"}
@@ -600,6 +630,39 @@ function AllowedListPanel() {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                             </svg>
                           </a>
+                          {(item.frontend_url || item.backend_docs_url) && (
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              {item.frontend_url && (
+                                <a
+                                  href={item.frontend_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={item.frontend_url}
+                                  className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-xs font-medium text-foreground-muted transition-colors hover:cursor-pointer hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700"
+                                >
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.6 9h16.8M3.6 15h16.8M12 3a14.5 14.5 0 010 18M12 3a14.5 14.5 0 000 18" />
+                                  </svg>
+                                  首頁
+                                </a>
+                              )}
+                              {item.backend_docs_url && (
+                                <a
+                                  href={item.backend_docs_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={item.backend_docs_url}
+                                  className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-xs font-medium text-foreground-muted transition-colors hover:cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700"
+                                >
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                                  </svg>
+                                  API Docs
+                                </a>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="px-5 py-4">
                           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
