@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { DialogProvider } from "@/components/Dialog";
+import { ThemeProvider, themeBootScript } from "@/components/ThemeProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,8 +28,16 @@ export default function RootLayout({
     <html
       lang="zh-TW"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
+      <body className="min-h-full flex flex-col">
+        <ThemeProvider>
+          <DialogProvider>{children}</DialogProvider>
+        </ThemeProvider>
+      </body>
     </html>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { ThemePicker } from "@/components/ThemePicker";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 const AUTH_PATH = process.env.NEXT_PUBLIC_AUTH_PATH || "microsoft";
@@ -35,18 +36,21 @@ function LoginContent() {
   const error = searchParams.get("error");
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="absolute right-4 top-4">
+        <ThemePicker />
+      </div>
       <div className="w-full max-w-sm">
-        <div className="rounded-xl bg-white p-8 shadow-lg">
+        <div className="rounded-xl border border-border bg-surface p-8 shadow-lg">
           {/* Header */}
           <div className="mb-8 text-center">
-            <h1 className="text-3xl font-bold text-gray-900">DF-SSO</h1>
-            <p className="mt-2 text-base text-gray-500">大豐 SSO 單一登入系統</p>
+            <h1 className="text-3xl font-bold text-foreground">DF-SSO</h1>
+            <p className="mt-2 text-base text-foreground-muted">大豐 SSO 單一登入系統</p>
           </div>
 
           {/* Error Message */}
           {error && (
-            <div className="mb-6 rounded-lg bg-red-50 p-3 text-center text-base text-red-600">
+            <div className="mb-6 rounded-xl bg-red-50 p-3 text-center text-base text-red-600 dark:bg-red-950 dark:text-red-300">
               {ERROR_MESSAGES[error] || `登入錯誤: ${error}`}
             </div>
           )}
@@ -54,7 +58,7 @@ function LoginContent() {
           {/* Microsoft Login Button */}
           <a
             href={`${API_BASE_URL}/api/auth/${AUTH_PATH}/login`}
-            className="flex w-full items-center justify-center gap-3 rounded-lg bg-[#2F2F2F] px-4 py-3 text-base font-medium text-white transition-colors hover:bg-[#0078D4]"
+            className="flex w-full items-center justify-center gap-3 rounded-xl bg-[#2F2F2F] px-4 py-3 text-base font-medium text-white transition-colors hover:cursor-pointer hover:bg-[#0078D4]"
           >
             <MicrosoftIcon />
             使用 Microsoft 帳號登入
@@ -69,8 +73,8 @@ export default function Home() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center">
-          <p>載入中...</p>
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <p className="text-foreground-muted">載入中...</p>
         </div>
       }
     >

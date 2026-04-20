@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
+import { useDialog } from "@/components/Dialog";
+import { ThemePicker } from "@/components/ThemePicker";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -101,7 +103,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <p className="text-gray-500">載入中...</p>
+        <p className="text-foreground-muted">載入中...</p>
       </div>
     );
   }
@@ -109,19 +111,20 @@ export default function DashboardPage() {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="bg-white shadow-sm">
+      <header className="bg-surface border-b border-border shadow-sm">
         <div className="mx-auto flex items-center justify-between px-6 py-4">
-          <h1 className="text-2xl font-bold text-gray-900">DF-SSO Dashboard</h1>
-          <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-bold text-foreground">DF-SSO Dashboard</h1>
+          <div className="flex items-center gap-3">
             <div className="text-right">
-              <p className="text-base font-medium text-gray-900">{user.name}</p>
-              <p className="text-sm text-gray-500">{user.email}</p>
+              <p className="text-base font-medium text-foreground">{user.name}</p>
+              <p className="text-sm text-foreground-muted">{user.email}</p>
             </div>
+            <ThemePicker />
             <button
               onClick={handleLogout}
-              className="rounded-lg border border-gray-300 px-4 py-2 text-base font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              className="rounded-xl border border-border bg-surface px-4 py-2 text-base font-medium text-foreground transition-colors hover:cursor-pointer hover:bg-surface-muted"
             >
               登出
             </button>
@@ -131,43 +134,43 @@ export default function DashboardPage() {
 
       {/* Tabs */}
       <div className="mx-6 pt-6">
-        <div className="flex gap-1 border-b border-gray-200">
+        <div className="flex gap-1 border-b border-border">
           <button
             onClick={() => setActiveTab("allowed")}
-            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors hover:cursor-pointer ${
               activeTab === "allowed"
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-primary text-primary"
+                : "border-transparent text-foreground-muted hover:text-foreground"
             }`}
           >
             白名單管理
           </button>
           <button
             onClick={() => setActiveTab("logs")}
-            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors hover:cursor-pointer ${
               activeTab === "logs"
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-primary text-primary"
+                : "border-transparent text-foreground-muted hover:text-foreground"
             }`}
           >
             登入紀錄
           </button>
           <button
             onClick={() => setActiveTab("admins")}
-            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors hover:cursor-pointer ${
               activeTab === "admins"
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-primary text-primary"
+                : "border-transparent text-foreground-muted hover:text-foreground"
             }`}
           >
             管理員
           </button>
           <button
             onClick={() => setActiveTab("settings")}
-            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2.5 text-base font-medium border-b-2 transition-colors hover:cursor-pointer ${
               activeTab === "settings"
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-primary text-primary"
+                : "border-transparent text-foreground-muted hover:text-foreground"
             }`}
           >
             設定
@@ -190,6 +193,7 @@ export default function DashboardPage() {
 // Allowed List CRUD Panel
 // ============================================
 function AllowedListPanel() {
+  const dialog = useDialog();
   const [items, setItems] = useState<AllowedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -294,7 +298,7 @@ function AllowedListPanel() {
       setForm({ domain: "", name: "", description: "", redirect_uris: "" });
       fetchList();
     } else {
-      alert(data.error || "操作失敗");
+      await dialog.alert({ type: "error", title: "操作失敗", message: data.error });
     }
   };
 
@@ -320,7 +324,13 @@ function AllowedListPanel() {
   };
 
   const handleDelete = async (item: AllowedItem) => {
-    if (!confirm(`確定要刪除「${item.name || item.domain}」嗎？`)) return;
+    const ok = await dialog.confirm({
+      type: "warning",
+      title: "確認刪除",
+      message: `確定要刪除「${item.name || item.domain}」嗎？`,
+      confirmText: "刪除",
+    });
+    if (!ok) return;
     await fetch(`${API}/api/allowed-list/${item.uid}`, {
       method: "DELETE",
       credentials: "include",
@@ -352,15 +362,21 @@ function AllowedListPanel() {
       if (data.success) {
         setCredentialsMap((prev) => ({ ...prev, [item.uid]: data.data }));
       } else {
-        alert(data.error || "取得 credentials 失敗");
+        await dialog.alert({ type: "error", title: "取得 credentials 失敗", message: data.error });
       }
     } catch {
-      alert("無法取得 credentials");
+      await dialog.alert({ type: "error", title: "無法取得 credentials", message: "請稍後再試" });
     }
   };
 
   const handleRegenerateSecret = async (item: AllowedItem) => {
-    if (!confirm(`確定要重新產生「${item.name || item.domain}」的 app_secret 嗎？\n現有的 secret 將立即失效！`)) return;
+    const ok = await dialog.confirm({
+      type: "warning",
+      title: "重新產生 App Secret",
+      message: `確定要重新產生「${item.name || item.domain}」的 app_secret 嗎？\n現有的 secret 將立即失效！`,
+      confirmText: "重新產生",
+    });
+    if (!ok) return;
     try {
       const res = await fetch(`${API}/api/allowed-list/${item.uid}/regenerate-secret`, {
         method: "POST",
@@ -372,12 +388,16 @@ function AllowedListPanel() {
           ...prev,
           [item.uid]: { app_id: data.data.app_id, app_secret: data.data.app_secret },
         }));
-        alert("app_secret 已重新產生，請立即複製！");
+        await dialog.alert({
+          type: "info",
+          title: "已重新產生",
+          message: "app_secret 已重新產生，請立即複製！",
+        });
       } else {
-        alert(data.error || "操作失敗");
+        await dialog.alert({ type: "error", title: "操作失敗", message: data.error });
       }
     } catch {
-      alert("操作失敗");
+      await dialog.alert({ type: "error", title: "操作失敗", message: "請稍後再試" });
     }
   };
 
@@ -389,23 +409,23 @@ function AllowedListPanel() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">應用程式管理</h2>
-          <p className="text-sm text-gray-500 mt-0.5">管理 SSO 串接的 Client App 與 OAuth2 Credentials</p>
+          <h2 className="text-xl font-semibold text-foreground">應用程式管理</h2>
+          <p className="text-sm text-foreground-muted mt-0.5">管理 SSO 串接的 Client App 與 OAuth2 Credentials</p>
         </div>
         <button
           onClick={handleAdd}
-          className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm"
+          className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm"
         >
           + 新增應用
         </button>
       </div>
 
       {/* Search & Filter Bar */}
-      <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-200 flex flex-wrap gap-3 items-end">
+      <div className="rounded-xl bg-surface p-4 shadow-sm border border-border flex flex-wrap gap-3 items-end">
         <div ref={comboboxRef} className="relative flex-1 min-w-[240px]">
-          <label className="block text-sm font-medium text-gray-500 mb-1">搜尋</label>
+          <label className="block text-sm font-medium text-foreground-muted mb-1">搜尋</label>
           <div className="relative">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
@@ -414,16 +434,16 @@ function AllowedListPanel() {
               onChange={(e) => { setSearchQuery(e.target.value); setShowSuggestions(true); }}
               onFocus={() => { if (searchQuery.trim()) setShowSuggestions(true); }}
               placeholder="搜尋名稱、網域、App ID..."
-              className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-xl border border-border pl-9 pr-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
           {showSuggestions && suggestions.length > 0 && (
-            <ul className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+            <ul className="absolute z-20 mt-1 w-full bg-surface border border-border rounded-xl shadow-lg max-h-48 overflow-y-auto">
               {suggestions.map((s, i) => (
                 <li
                   key={i}
                   onClick={() => { setSearchQuery(s); setShowSuggestions(false); }}
-                  className="px-3 py-2 text-sm text-gray-700 cursor-pointer hover:bg-blue-50 hover:text-blue-700"
+                  className="px-3 py-2 text-sm text-foreground cursor-pointer hover:bg-blue-50 hover:text-blue-700"
                 >
                   {s}
                 </li>
@@ -432,11 +452,11 @@ function AllowedListPanel() {
           )}
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-500 mb-1">狀態</label>
+          <label className="block text-sm font-medium text-foreground-muted mb-1">狀態</label>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as "all" | "active" | "inactive")}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm w-32 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="rounded-xl border border-border px-3 py-2 text-sm w-32 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="all">全部</option>
             <option value="active">啟用中</option>
@@ -446,7 +466,7 @@ function AllowedListPanel() {
         {(searchQuery || statusFilter !== "all") && (
           <button
             onClick={() => { setSearchQuery(""); setStatusFilter("all"); setShowSuggestions(false); }}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            className="rounded-xl border border-border px-3 py-2 text-sm font-medium text-gray-600 hover:bg-surface-muted"
           >
             清除篩選
           </button>
@@ -455,63 +475,63 @@ function AllowedListPanel() {
 
       {/* Form */}
       {showForm && (
-        <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
-          <h3 className="text-base font-semibold text-gray-900 mb-4">
+        <div className="rounded-xl bg-surface p-6 shadow-sm border border-border">
+          <h3 className="text-base font-semibold text-foreground mb-4">
             {editItem ? "編輯應用" : "新增應用"}
           </h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">網域 *</label>
+                <label className="block text-sm font-medium text-foreground mb-1">網域 *</label>
                 <input
                   type="text"
                   required
                   value={form.domain}
                   onChange={(e) => setForm({ ...form, domain: e.target.value })}
                   placeholder="https://crm.df-recycle.com.tw"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-xl border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">系統名稱</label>
+                <label className="block text-sm font-medium text-foreground mb-1">系統名稱</label>
                 <input
                   type="text"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   placeholder="CRM 系統"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-xl border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">說明</label>
+              <label className="block text-sm font-medium text-foreground mb-1">說明</label>
               <input
                 type="text"
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
                 placeholder="系統說明"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-xl border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Redirect URIs</label>
+              <label className="block text-sm font-medium text-foreground mb-1">Redirect URIs</label>
               <textarea
                 rows={3}
                 value={form.redirect_uris}
                 onChange={(e) => setForm({ ...form, redirect_uris: e.target.value })}
                 placeholder={"http://localhost:3100\nhttps://app.apps.zerozero.tw"}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-xl border border-border px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-              <p className="mt-1 text-xs text-gray-400">每行一個 origin（dev / test / prod），最多 10 筆</p>
+              <p className="mt-1 text-xs text-foreground-muted">每行一個 origin（dev / test / prod），最多 10 筆</p>
             </div>
             <div className="flex gap-2 pt-1">
-              <button type="submit" className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700">
+              <button type="submit" className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700">
                 {editItem ? "儲存變更" : "建立應用"}
               </button>
               <button
                 type="button"
                 onClick={() => { setShowForm(false); setEditItem(null); }}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+                className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-gray-600 hover:bg-surface-muted"
               >
                 取消
               </button>
@@ -521,120 +541,136 @@ function AllowedListPanel() {
       )}
 
       {/* Table */}
-      <div className="rounded-xl bg-white shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 text-sm text-gray-500">
+      <div className="rounded-xl bg-surface shadow-sm border border-border overflow-hidden">
+        <div className="px-4 py-3 border-b border-border text-sm text-foreground-muted">
           共 {filteredItems.length}{filteredItems.length !== items.length ? ` / ${items.length}` : ""} 筆應用
         </div>
         {loading ? (
-          <p className="py-12 text-center text-sm text-gray-400">載入中...</p>
+          <p className="py-12 text-center text-sm text-foreground-muted">載入中...</p>
         ) : filteredItems.length === 0 ? (
-          <p className="py-12 text-center text-sm text-gray-400">
+          <p className="py-12 text-center text-sm text-foreground-muted">
             {items.length === 0 ? "尚無應用程式" : "無符合條件的應用"}
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-base min-w-[1400px]">
-              <thead className="bg-gray-50 text-left text-base text-gray-500 whitespace-nowrap">
+            <table className="w-full text-base min-w-[900px]">
+              <thead className="bg-surface-muted text-left text-base text-foreground-muted whitespace-nowrap">
                 <tr>
                   <th className="px-5 py-3 font-medium">狀態</th>
                   <th className="px-5 py-3 font-medium">名稱</th>
                   <th className="px-5 py-3 font-medium">網域</th>
-                  <th className="px-5 py-3 font-medium">App ID</th>
-                  <th className="px-5 py-3 font-medium">Secret</th>
-                  <th className="px-5 py-3 font-medium">Redirect URIs</th>
+                  <th className="px-5 py-3 font-medium">Credentials</th>
                   <th className="px-5 py-3 font-medium">操作</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-border">
                 {filteredItems.map((item) => {
                   const creds = credentialsMap[item.uid];
                   return (
                     <Fragment key={item.uid}>
-                      <tr className="hover:bg-gray-50/50">
-                        <td className="px-5 py-3 whitespace-nowrap">
+                      <tr className="hover:bg-surface-muted/50 align-top">
+                        <td className="px-5 py-4 whitespace-nowrap">
                           <button
                             onClick={() => handleToggleActive(item)}
                             title={item.is_active ? "點擊停用" : "點擊啟用"}
-                            className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-base font-medium transition-colors ${
+                            className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-base font-medium transition-colors hover:cursor-pointer ${
                               item.is_active
                                 ? "bg-green-50 text-green-700 hover:bg-green-100"
-                                : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                                : "bg-gray-100 text-foreground-muted hover:bg-gray-200"
                             }`}
                           >
                             <span className={`h-2 w-2 rounded-full ${item.is_active ? "bg-green-500" : "bg-gray-400"}`} />
                             {item.is_active ? "啟用" : "停用"}
                           </button>
                         </td>
-                        <td className="px-5 py-3 whitespace-nowrap">
-                          <div className="font-medium text-gray-900">{item.name || "未命名"}</div>
-                          {item.description && <div className="text-sm text-gray-400 mt-0.5">{item.description}</div>}
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          <div className="font-medium text-foreground">{item.name || "未命名"}</div>
+                          {item.description && <div className="text-sm text-foreground-muted mt-0.5">{item.description}</div>}
                         </td>
-                        <td className="px-5 py-3 whitespace-nowrap">
-                          <code className="font-mono text-gray-700">{item.domain}</code>
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          <a
+                            href={item.domain}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="開啟新分頁"
+                            className="inline-flex items-center gap-1.5 font-mono text-blue-600 hover:text-blue-800 hover:underline hover:cursor-pointer transition-colors"
+                          >
+                            {item.domain}
+                            <svg className="h-3.5 w-3.5 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                          </a>
                         </td>
-                        <td className="px-5 py-3 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <code className="rounded bg-blue-50 px-2 py-0.5 font-mono text-blue-700 select-all">{item.app_id}</code>
-                            <button onClick={() => copyToClipboard(item.app_id)} className="text-gray-400 hover:text-gray-600 transition-colors" title="複製">
-                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
-                            </button>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3 whitespace-nowrap">
-                          {creds ? (
-                            <div className="flex items-center gap-2">
-                              <code className="rounded bg-amber-50 border border-amber-200 px-2 py-0.5 font-mono text-gray-800 select-all">
-                                {creds.app_secret.slice(0, 20)}...
-                              </code>
-                              <button onClick={() => copyToClipboard(creds.app_secret)} className="text-amber-500 hover:text-amber-700 transition-colors" title="複製完整 Secret">
+                        <td className="px-5 py-4">
+                          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
+                            {/* App ID */}
+                            <dt className="font-medium text-foreground-muted whitespace-nowrap">App ID</dt>
+                            <dd className="flex items-center gap-2 min-w-0">
+                              <code className="rounded bg-blue-50 px-2 py-0.5 font-mono text-blue-700 select-all break-all">{item.app_id}</code>
+                              <button onClick={() => copyToClipboard(item.app_id)} className="shrink-0 text-foreground-muted hover:text-gray-600 hover:cursor-pointer transition-colors" title="複製">
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
                               </button>
-                              <button
-                                onClick={() => handleShowCredentials(item)}
-                                className="text-amber-600 hover:text-amber-800 transition-colors"
-                                title="隱藏"
-                              >
-                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" /></svg>
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-gray-400">••••••••</span>
-                              <button
-                                onClick={() => handleShowCredentials(item)}
-                                className="text-indigo-600 hover:text-indigo-800 transition-colors"
-                                title="顯示"
-                              >
-                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                              </button>
-                            </div>
-                          )}
+                            </dd>
+
+                            {/* App Secret */}
+                            <dt className="font-medium text-foreground-muted whitespace-nowrap">App Secret</dt>
+                            <dd className="flex items-center gap-2 min-w-0">
+                              {creds ? (
+                                <>
+                                  <code className="rounded bg-amber-50 border border-amber-200 px-2 py-0.5 font-mono text-gray-800 select-all break-all">
+                                    {creds.app_secret}
+                                  </code>
+                                  <button onClick={() => copyToClipboard(creds.app_secret)} className="shrink-0 text-amber-500 hover:text-amber-700 hover:cursor-pointer transition-colors" title="複製完整 Secret">
+                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
+                                  </button>
+                                  <button onClick={() => handleShowCredentials(item)} className="shrink-0 text-amber-600 hover:text-amber-800 hover:cursor-pointer transition-colors" title="隱藏">
+                                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" /></svg>
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="font-mono text-foreground-muted">••••••••••••••••</span>
+                                  <button onClick={() => handleShowCredentials(item)} className="shrink-0 text-indigo-600 hover:text-indigo-800 hover:cursor-pointer transition-colors" title="顯示">
+                                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                  </button>
+                                </>
+                              )}
+                            </dd>
+
+                            {/* Redirect URIs */}
+                            <dt className="font-medium text-foreground-muted whitespace-nowrap">Redirect URI</dt>
+                            <dd className="min-w-0">
+                              {item.redirect_uris?.length > 0 ? (
+                                <ul className="flex flex-col gap-1">
+                                  {item.redirect_uris.map((uri, i) => (
+                                    <li key={i} className="flex items-center gap-2 min-w-0">
+                                      <code className="rounded bg-slate-100 px-2 py-0.5 font-mono text-slate-700 select-all break-all">{uri}</code>
+                                      <button onClick={() => copyToClipboard(uri)} className="shrink-0 text-foreground-muted hover:text-gray-600 hover:cursor-pointer transition-colors" title="複製">
+                                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/></svg>
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <span className="text-foreground-muted">-</span>
+                              )}
+                            </dd>
+                          </dl>
                         </td>
-                        <td className="px-5 py-3">
-                          {item.redirect_uris?.length > 0 ? (
-                            <div className="flex flex-wrap gap-1.5">
-                              {item.redirect_uris.map((uri, i) => (
-                                <span key={i} className="inline-flex rounded bg-slate-100 px-2 py-0.5 font-mono text-sm text-slate-700 whitespace-nowrap">{uri}</span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-gray-300">-</span>
-                          )}
-                        </td>
-                        <td className="px-5 py-3 whitespace-nowrap">
+                        <td className="px-5 py-4 whitespace-nowrap">
                           <div className="flex items-center gap-2">
                             {creds && (
                               <button
                                 onClick={() => handleRegenerateSecret(item)}
-                                className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-base font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                                className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-base font-medium text-amber-700 hover:bg-amber-100 hover:cursor-pointer transition-colors"
                               >
                                 重新產生
                               </button>
                             )}
-                            <button onClick={() => handleEdit(item)} className="rounded-lg px-3 py-1.5 text-base font-medium text-blue-600 hover:bg-blue-50 transition-colors">
+                            <button onClick={() => handleEdit(item)} className="rounded-xl px-3 py-1.5 text-base font-medium text-blue-600 hover:bg-blue-50 hover:cursor-pointer transition-colors">
                               編輯
                             </button>
-                            <button onClick={() => handleDelete(item)} className="rounded-lg px-3 py-1.5 text-base font-medium text-red-500 hover:bg-red-50 transition-colors">
+                            <button onClick={() => handleDelete(item)} className="rounded-xl px-3 py-1.5 text-base font-medium text-red-500 hover:bg-red-50 hover:cursor-pointer transition-colors">
                               刪除
                             </button>
                           </div>
@@ -743,15 +779,15 @@ function LoginLogPanel() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-semibold text-gray-900">登入紀錄搜尋</h2>
+      <h2 className="text-xl font-semibold text-foreground">登入紀錄搜尋</h2>
 
       {/* Filters */}
       <form
         onSubmit={handleSearch}
-        className="rounded-xl bg-white p-4 shadow-sm flex flex-wrap gap-3 items-end"
+        className="rounded-xl bg-surface p-4 shadow-sm flex flex-wrap gap-3 items-end"
       >
         <div>
-          <label className="block text-sm font-medium text-gray-500 mb-1">
+          <label className="block text-sm font-medium text-foreground-muted mb-1">
             Email
           </label>
           <input
@@ -759,17 +795,17 @@ function LoginLogPanel() {
             value={filters.email}
             onChange={(e) => setFilters({ ...filters, email: e.target.value })}
             placeholder="搜尋 Email"
-            className="rounded-lg border border-gray-300 px-3 py-2 text-base w-52 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="rounded-xl border border-border px-3 py-2 text-base w-52 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-500 mb-1">
+          <label className="block text-sm font-medium text-foreground-muted mb-1">
             狀態
           </label>
           <select
             value={filters.status}
             onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-base w-40 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="rounded-xl border border-border px-3 py-2 text-base w-40 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="">全部</option>
             <option value="success">成功</option>
@@ -778,7 +814,7 @@ function LoginLogPanel() {
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-500 mb-1">
+          <label className="block text-sm font-medium text-foreground-muted mb-1">
             開始日期
           </label>
           <input
@@ -787,11 +823,11 @@ function LoginLogPanel() {
             onChange={(e) =>
               setFilters({ ...filters, startDate: e.target.value })
             }
-            className="rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="rounded-xl border border-border px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-500 mb-1">
+          <label className="block text-sm font-medium text-foreground-muted mb-1">
             結束日期
           </label>
           <input
@@ -800,37 +836,37 @@ function LoginLogPanel() {
             onChange={(e) =>
               setFilters({ ...filters, endDate: e.target.value })
             }
-            className="rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="rounded-xl border border-border px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
         <button
           type="submit"
-          className="rounded-lg bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700"
+          className="rounded-xl bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700"
         >
           搜尋
         </button>
         <button
           type="button"
           onClick={handleReset}
-          className="rounded-lg border border-gray-300 px-4 py-2 text-base font-medium text-gray-700 hover:bg-gray-50"
+          className="rounded-xl border border-border px-4 py-2 text-base font-medium text-foreground hover:bg-surface-muted"
         >
           重置
         </button>
       </form>
 
       {/* Results */}
-      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 text-sm text-gray-500">
+      <div className="rounded-xl bg-surface shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-border text-sm text-foreground-muted">
           共 {total} 筆紀錄
         </div>
         {loading ? (
-          <p className="p-6 text-base text-gray-500">載入中...</p>
+          <p className="p-6 text-base text-foreground-muted">載入中...</p>
         ) : logs.length === 0 ? (
-          <p className="p-6 text-base text-gray-500">無符合條件的紀錄</p>
+          <p className="p-6 text-base text-foreground-muted">無符合條件的紀錄</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-base">
-              <thead className="bg-gray-50 text-left text-gray-500">
+              <thead className="bg-surface-muted text-left text-foreground-muted">
                 <tr>
                   <th className="px-4 py-3 font-medium">時間</th>
                   <th className="px-4 py-3 font-medium">Email</th>
@@ -841,22 +877,22 @@ function LoginLogPanel() {
                   <th className="px-4 py-3 font-medium">IP</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-border">
                 {logs.map((log) => (
                   <tr key={log.uid}>
-                    <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm text-foreground-muted whitespace-nowrap">
                       {formatDate(log.created_at)}
                     </td>
-                    <td className="px-4 py-3 text-gray-900">{log.email || "-"}</td>
-                    <td className="px-4 py-3 text-gray-900">{log.name || "-"}</td>
-                    <td className="px-4 py-3 font-mono text-sm text-gray-900">
+                    <td className="px-4 py-3 text-foreground">{log.email || "-"}</td>
+                    <td className="px-4 py-3 text-foreground">{log.name || "-"}</td>
+                    <td className="px-4 py-3 font-mono text-sm text-foreground">
                       {log.erp_gen01 || "-"}
                     </td>
-                    <td className="px-4 py-3 text-gray-900">
+                    <td className="px-4 py-3 text-foreground">
                       {log.erp_gem02 || "-"}
                     </td>
                     <td className="px-4 py-3">{statusLabel(log.status)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
+                    <td className="px-4 py-3 text-sm text-foreground-muted">
                       {log.ip_address || "-"}
                     </td>
                   </tr>
@@ -868,21 +904,21 @@ function LoginLogPanel() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+          <div className="flex items-center justify-between px-4 py-3 border-t border-border">
             <button
               disabled={filters.page <= 1}
               onClick={() => setFilters({ ...filters, page: filters.page - 1 })}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="rounded-xl border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-surface-muted disabled:opacity-40 disabled:cursor-not-allowed"
             >
               上一頁
             </button>
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-foreground-muted">
               第 {filters.page} / {totalPages} 頁
             </span>
             <button
               disabled={filters.page >= totalPages}
               onClick={() => setFilters({ ...filters, page: filters.page + 1 })}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="rounded-xl border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-surface-muted disabled:opacity-40 disabled:cursor-not-allowed"
             >
               下一頁
             </button>
@@ -897,6 +933,7 @@ function LoginLogPanel() {
 // Admin Manager Panel
 // ============================================
 function AdminManagerPanel() {
+  const dialog = useDialog();
   const [admins, setAdmins] = useState<AdminItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -935,7 +972,7 @@ function AdminManagerPanel() {
       setForm({ email: "" });
       fetchAdmins();
     } else {
-      alert(data.error || "操作失敗");
+      await dialog.alert({ type: "error", title: "操作失敗", message: data.error });
     }
   };
 
@@ -950,14 +987,20 @@ function AdminManagerPanel() {
   };
 
   const handleDelete = async (item: AdminItem) => {
-    if (!confirm(`確定要刪除管理員「${item.name || item.email}」嗎？`)) return;
+    const ok = await dialog.confirm({
+      type: "warning",
+      title: "確認刪除管理員",
+      message: `確定要刪除管理員「${item.name || item.email}」嗎？`,
+      confirmText: "刪除",
+    });
+    if (!ok) return;
     const res = await fetch(`${API}/api/admin-manager/${item.uid}`, {
       method: "DELETE",
       credentials: "include",
     });
     const data = await res.json();
     if (!data.success) {
-      alert(data.error || "刪除失敗");
+      await dialog.alert({ type: "error", title: "刪除失敗", message: data.error });
     }
     fetchAdmins();
   };
@@ -969,13 +1012,13 @@ function AdminManagerPanel() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900">管理員名單</h2>
+        <h2 className="text-xl font-semibold text-foreground">管理員名單</h2>
         <button
           onClick={() => {
             setForm({ email: "" });
             setShowForm(true);
           }}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700 transition-colors"
+          className="rounded-xl bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700 transition-colors"
         >
           新增管理員
         </button>
@@ -983,13 +1026,13 @@ function AdminManagerPanel() {
 
       {/* Form */}
       {showForm && (
-        <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
-          <h3 className="text-base font-semibold text-gray-900 mb-4">
+        <div className="rounded-xl bg-surface p-6 shadow-sm border border-border">
+          <h3 className="text-base font-semibold text-foreground mb-4">
             新增管理員
           </h3>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="block text-base font-medium text-gray-700 mb-1">
+              <label className="block text-base font-medium text-foreground mb-1">
                 Email *
               </label>
               <input
@@ -998,23 +1041,23 @@ function AdminManagerPanel() {
                 value={form.email}
                 onChange={(e) => setForm({ email: e.target.value })}
                 placeholder="new-admin@df-recycle.com"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-xl border border-border px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-              <p className="mt-1 text-sm text-gray-400">
+              <p className="mt-1 text-sm text-foreground-muted">
                 新管理員首次登入 SSO 後會自動填入姓名與 Azure AD 資訊
               </p>
             </div>
             <div className="flex gap-2 pt-2">
               <button
                 type="submit"
-                className="rounded-lg bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700"
+                className="rounded-xl bg-blue-600 px-4 py-2 text-base font-medium text-white hover:bg-blue-700"
               >
                 新增
               </button>
               <button
                 type="button"
                 onClick={() => setShowForm(false)}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-base font-medium text-gray-700 hover:bg-gray-50"
+                className="rounded-xl border border-border px-4 py-2 text-base font-medium text-foreground hover:bg-surface-muted"
               >
                 取消
               </button>
@@ -1024,14 +1067,14 @@ function AdminManagerPanel() {
       )}
 
       {/* Table */}
-      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl bg-surface shadow-sm overflow-hidden">
         {loading ? (
-          <p className="p-6 text-base text-gray-500">載入中...</p>
+          <p className="p-6 text-base text-foreground-muted">載入中...</p>
         ) : admins.length === 0 ? (
-          <p className="p-6 text-base text-gray-500">尚無資料</p>
+          <p className="p-6 text-base text-foreground-muted">尚無資料</p>
         ) : (
           <table className="w-full text-base">
-            <thead className="bg-gray-50 text-left text-gray-500">
+            <thead className="bg-surface-muted text-left text-foreground-muted">
               <tr>
                 <th className="px-4 py-3 font-medium">Email</th>
                 <th className="px-4 py-3 font-medium">姓名</th>
@@ -1041,11 +1084,11 @@ function AdminManagerPanel() {
                 <th className="px-4 py-3 font-medium">操作</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-border">
               {admins.map((item) => (
                 <tr key={item.uid}>
-                  <td className="px-4 py-3 text-gray-900">{item.email}</td>
-                  <td className="px-4 py-3 text-gray-900">
+                  <td className="px-4 py-3 text-foreground">{item.email}</td>
+                  <td className="px-4 py-3 text-foreground">
                     {item.name || "-"}
                   </td>
                   <td className="px-4 py-3">
@@ -1054,7 +1097,7 @@ function AdminManagerPanel() {
                       className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-medium ${
                         item.is_active
                           ? "bg-green-100 text-green-700"
-                          : "bg-gray-100 text-gray-500"
+                          : "bg-gray-100 text-foreground-muted"
                       }`}
                     >
                       {item.is_active ? "啟用" : "停用"}
@@ -1071,7 +1114,7 @@ function AdminManagerPanel() {
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                  <td className="px-4 py-3 text-sm text-foreground-muted whitespace-nowrap">
                     {formatDate(item.created_at)}
                   </td>
                   <td className="px-4 py-3">
@@ -1101,6 +1144,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 function SettingsPanel() {
+  const dialog = useDialog();
   const [items, setItems] = useState<SettingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>({});
@@ -1157,10 +1201,10 @@ function SettingsPanel() {
       if (data.success) {
         await fetchSettings();
       } else {
-        alert(data.error || "儲存失敗");
+        await dialog.alert({ type: "error", title: "儲存失敗", message: data.error });
       }
     } catch {
-      alert("儲存失敗");
+      await dialog.alert({ type: "error", title: "儲存失敗", message: "請稍後再試" });
     } finally {
       setSavingKey(null);
     }
@@ -1184,7 +1228,7 @@ function SettingsPanel() {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-foreground mb-1">
             視窗長度 windowMs（毫秒）
           </label>
           <input
@@ -1193,14 +1237,14 @@ function SettingsPanel() {
             step={1000}
             value={windowMs}
             onChange={(e) => setField(item.key, "windowMs", Number(e.target.value))}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-xl border border-border px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
-          <p className="mt-1 text-xs text-gray-400">
+          <p className="mt-1 text-xs text-foreground-muted">
             約 {windowMinutes >= 1 ? `${windowMinutes} 分鐘` : `${windowMs / 1000} 秒`}
           </p>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-foreground mb-1">
             最大請求數 max（每 IP / 每視窗）
           </label>
           <input
@@ -1209,7 +1253,7 @@ function SettingsPanel() {
             step={1}
             value={max}
             onChange={(e) => setField(item.key, "max", Number(e.target.value))}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-xl border border-border px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
       </div>
@@ -1221,7 +1265,7 @@ function SettingsPanel() {
     const text = JSON.stringify(draft, null, 2);
     return (
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">JSON value</label>
+        <label className="block text-sm font-medium text-foreground mb-1">JSON value</label>
         <textarea
           rows={5}
           value={text}
@@ -1235,7 +1279,7 @@ function SettingsPanel() {
               // 無效 JSON 時先不更新 draft
             }
           }}
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="w-full rounded-xl border border-border px-3 py-2 text-xs font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       </div>
     );
@@ -1244,16 +1288,16 @@ function SettingsPanel() {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900">系統設定</h2>
-        <p className="text-sm text-gray-500 mt-0.5">
+        <h2 className="text-xl font-semibold text-foreground">系統設定</h2>
+        <p className="text-sm text-foreground-muted mt-0.5">
           儲存於 sso_setting 表，rate_limit 類型修改後立即生效（視窗計數會重置）
         </p>
       </div>
 
       {loading ? (
-        <p className="py-12 text-center text-sm text-gray-400">載入中...</p>
+        <p className="py-12 text-center text-sm text-foreground-muted">載入中...</p>
       ) : items.length === 0 ? (
-        <p className="py-12 text-center text-sm text-gray-400">尚無設定</p>
+        <p className="py-12 text-center text-sm text-foreground-muted">尚無設定</p>
       ) : (
         Object.entries(grouped).map(([category, group]) => (
           <section key={category} className="space-y-3">
@@ -1265,11 +1309,11 @@ function SettingsPanel() {
                 const dirty = isDirty(item);
                 const saving = savingKey === item.key;
                 return (
-                  <div key={item.key} className="rounded-xl bg-white shadow-sm border border-gray-200 overflow-hidden">
-                    <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+                  <div key={item.key} className="rounded-xl bg-surface shadow-sm border border-border overflow-hidden">
+                    <div className="px-5 py-3 border-b border-border flex items-center justify-between">
                       <div>
-                        <h4 className="font-semibold text-gray-900">{item.label || item.key}</h4>
-                        <code className="text-xs text-gray-400 font-mono">{item.key}</code>
+                        <h4 className="font-semibold text-foreground">{item.label || item.key}</h4>
+                        <code className="text-xs text-foreground-muted font-mono">{item.key}</code>
                       </div>
                       {dirty && (
                         <span className="text-xs font-medium text-amber-600">未儲存</span>
@@ -1277,7 +1321,7 @@ function SettingsPanel() {
                     </div>
                     <div className="px-5 py-4 space-y-3">
                       {item.description && (
-                        <p className="text-sm text-gray-500">{item.description}</p>
+                        <p className="text-sm text-foreground-muted">{item.description}</p>
                       )}
                       {category === "rate_limit"
                         ? renderRateLimitEditor(item)
@@ -1287,7 +1331,7 @@ function SettingsPanel() {
                           type="button"
                           disabled={!dirty || saving}
                           onClick={() => handleSave(item)}
-                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           {saving ? "儲存中..." : "儲存"}
                         </button>
@@ -1295,7 +1339,7 @@ function SettingsPanel() {
                           type="button"
                           disabled={!dirty || saving}
                           onClick={() => handleReset(item)}
-                          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-gray-600 hover:bg-surface-muted disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           重設
                         </button>
