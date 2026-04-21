@@ -583,14 +583,14 @@ function AllowedListPanel() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-base min-w-[900px]">
+            <table className="w-full text-base min-w-[1280px]">
               <thead className="bg-surface-muted text-left text-base text-foreground-muted whitespace-nowrap">
                 <tr>
-                  <th className="px-5 py-3 font-medium">狀態</th>
-                  <th className="px-5 py-3 font-medium">名稱</th>
-                  <th className="px-5 py-3 font-medium">網域</th>
-                  <th className="px-5 py-3 font-medium">Credentials</th>
-                  <th className="px-5 py-3 font-medium">操作</th>
+                  <th className="px-5 py-3 font-medium min-w-[110px]">狀態</th>
+                  <th className="px-5 py-3 font-medium min-w-[220px]">名稱</th>
+                  <th className="px-5 py-3 font-medium min-w-[320px]">網域</th>
+                  <th className="px-5 py-3 font-medium min-w-[460px]">Credentials</th>
+                  <th className="px-5 py-3 font-medium min-w-[240px]">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -928,16 +928,16 @@ function LoginLogPanel() {
           <p className="p-6 text-base text-foreground-muted">無符合條件的紀錄</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-base">
-              <thead className="bg-surface-muted text-left text-foreground-muted">
+            <table className="w-full text-base min-w-[1100px]">
+              <thead className="bg-surface-muted text-left text-foreground-muted whitespace-nowrap">
                 <tr>
-                  <th className="px-4 py-3 font-medium">時間</th>
-                  <th className="px-4 py-3 font-medium">Email</th>
-                  <th className="px-4 py-3 font-medium">姓名</th>
-                  <th className="px-4 py-3 font-medium">員工編號</th>
-                  <th className="px-4 py-3 font-medium">部門</th>
-                  <th className="px-4 py-3 font-medium">狀態</th>
-                  <th className="px-4 py-3 font-medium">IP</th>
+                  <th className="px-4 py-3 font-medium min-w-[200px]">時間</th>
+                  <th className="px-4 py-3 font-medium min-w-[240px]">Email</th>
+                  <th className="px-4 py-3 font-medium min-w-[140px]">姓名</th>
+                  <th className="px-4 py-3 font-medium min-w-[130px]">員工編號</th>
+                  <th className="px-4 py-3 font-medium min-w-[140px]">部門</th>
+                  <th className="px-4 py-3 font-medium min-w-[120px]">狀態</th>
+                  <th className="px-4 py-3 font-medium min-w-[140px]">IP</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -946,16 +946,16 @@ function LoginLogPanel() {
                     <td className="px-4 py-3 text-sm text-foreground-muted whitespace-nowrap">
                       {formatDate(log.created_at)}
                     </td>
-                    <td className="px-4 py-3 text-foreground">{log.email || "-"}</td>
-                    <td className="px-4 py-3 text-foreground">{log.name || "-"}</td>
-                    <td className="px-4 py-3 font-mono text-sm text-foreground">
+                    <td className="px-4 py-3 text-foreground whitespace-nowrap">{log.email || "-"}</td>
+                    <td className="px-4 py-3 text-foreground whitespace-nowrap">{log.name || "-"}</td>
+                    <td className="px-4 py-3 font-mono text-sm text-foreground whitespace-nowrap">
                       {log.erp_gen01 || "-"}
                     </td>
-                    <td className="px-4 py-3 text-foreground">
+                    <td className="px-4 py-3 text-foreground whitespace-nowrap">
                       {log.erp_gem02 || "-"}
                     </td>
-                    <td className="px-4 py-3">{statusLabel(log.status)}</td>
-                    <td className="px-4 py-3 text-sm text-foreground-muted">
+                    <td className="px-4 py-3 whitespace-nowrap">{statusLabel(log.status)}</td>
+                    <td className="px-4 py-3 text-sm text-foreground-muted whitespace-nowrap">
                       {log.ip_address || "-"}
                     </td>
                   </tr>
@@ -1136,62 +1136,64 @@ function AdminManagerPanel() {
         ) : admins.length === 0 ? (
           <p className="p-6 text-base text-foreground-muted">尚無資料</p>
         ) : (
-          <table className="w-full text-base">
-            <thead className="bg-surface-muted text-left text-foreground-muted">
-              <tr>
-                <th className="px-4 py-3 font-medium">Email</th>
-                <th className="px-4 py-3 font-medium">姓名</th>
-                <th className="px-4 py-3 font-medium">狀態</th>
-                <th className="px-4 py-3 font-medium">登入狀態</th>
-                <th className="px-4 py-3 font-medium">建立時間</th>
-                <th className="px-4 py-3 font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {admins.map((item) => (
-                <tr key={item.uid}>
-                  <td className="px-4 py-3 text-foreground">{item.email}</td>
-                  <td className="px-4 py-3 text-foreground">
-                    {item.name || "-"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleToggleActive(item)}
-                      className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-medium ${
-                        item.is_active
-                          ? "bg-green-100 text-green-700"
-                          : "bg-gray-100 text-foreground-muted"
-                      }`}
-                    >
-                      {item.is_active ? "啟用" : "停用"}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    {item.is_newer ? (
-                      <span className="inline-block rounded-full bg-yellow-100 px-2.5 py-0.5 text-sm font-medium text-yellow-700">
-                        未登入
-                      </span>
-                    ) : (
-                      <span className="inline-block rounded-full bg-blue-100 px-2.5 py-0.5 text-sm font-medium text-blue-700">
-                        已啟用
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-foreground-muted whitespace-nowrap">
-                    {formatDate(item.created_at)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleDelete(item)}
-                      className="text-red-600 hover:text-red-800 text-sm font-medium"
-                    >
-                      刪除
-                    </button>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-base min-w-[960px]">
+              <thead className="bg-surface-muted text-left text-foreground-muted whitespace-nowrap">
+                <tr>
+                  <th className="px-4 py-3 font-medium min-w-[260px]">Email</th>
+                  <th className="px-4 py-3 font-medium min-w-[160px]">姓名</th>
+                  <th className="px-4 py-3 font-medium min-w-[110px]">狀態</th>
+                  <th className="px-4 py-3 font-medium min-w-[130px]">登入狀態</th>
+                  <th className="px-4 py-3 font-medium min-w-[200px]">建立時間</th>
+                  <th className="px-4 py-3 font-medium min-w-[100px]">操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {admins.map((item) => (
+                  <tr key={item.uid}>
+                    <td className="px-4 py-3 text-foreground whitespace-nowrap">{item.email}</td>
+                    <td className="px-4 py-3 text-foreground whitespace-nowrap">
+                      {item.name || "-"}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <button
+                        onClick={() => handleToggleActive(item)}
+                        className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-medium ${
+                          item.is_active
+                            ? "bg-green-100 text-green-700"
+                            : "bg-gray-100 text-foreground-muted"
+                        }`}
+                      >
+                        {item.is_active ? "啟用" : "停用"}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {item.is_newer ? (
+                        <span className="inline-block rounded-full bg-yellow-100 px-2.5 py-0.5 text-sm font-medium text-yellow-700">
+                          未登入
+                        </span>
+                      ) : (
+                        <span className="inline-block rounded-full bg-blue-100 px-2.5 py-0.5 text-sm font-medium text-blue-700">
+                          已啟用
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-foreground-muted whitespace-nowrap">
+                      {formatDate(item.created_at)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <button
+                        onClick={() => handleDelete(item)}
+                        className="text-red-600 hover:text-red-800 text-sm font-medium"
+                      >
+                        刪除
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
