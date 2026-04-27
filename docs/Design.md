@@ -142,17 +142,41 @@
   → App-B exchange { code, client_id, client_secret } → 存 token → Dashboard
 ```
 
-### 登出流程
+### 登出流程（含 OIDC RP-Initiated Logout）
 
 ```
 App-A 點登出 → /api/auth/logout
   → 讀本地 token → POST SSO /api/auth/logout (Bearer)
-  → SSO 刪除 Redis session
+                  body: { redirect: "<APP_URL>/?logged_out=1" }
+  → SSO 刪除 Redis session（讀出 microsoftIdToken 後再 del）
   → SSO back-channel POST 所有 App /api/auth/back-channel-logout
     { user_id, timestamp, signature }  ← HMAC-SHA256(app_secret, user_id:timestamp)
-  → App-A 清除本地 cookie → redirect /?logged_out=1
-  → App-B 下次 /me → SSO 回 401 → 清本地 token → 顯示登入按鈕
+  → SSO 驗證 redirect origin 在 sso_allowed_list，建構 AD logout_url：
+    https://login.microsoftonline.com/{tenant}/oauth2/v2.0/logout
+      ?id_token_hint={microsoftIdToken}
+      &post_logout_redirect_uri={SSO}/api/auth/sso/post-logout?redirect=...
+    回傳 { message, logout_url }
+  → App-A 清除本地 cookie → 302 logout_url
+  → 瀏覽器訪問 Microsoft → AD 清掉自己的 SSO cookie → 302 SSO /post-logout
+  → SSO /post-logout 再次驗證 redirect origin → 302 到 <APP_URL>/?logged_out=1
+
+關鍵：必須走 AD 端 logout 才會清掉 login.microsoftonline.com 上的 SSO cookie，
+否則下次任何 App 走 /authorize 會被 AD 靜默重新登入（silent SSO）。
 ```
+
+> **Azure App Registration 設定要求：**
+>
+> Azure Portal → App Registrations → 你的 SSO App → **Authentication** →
+> **Front-channel logout URL**（或 post logout redirect URIs）需要登記：
+>
+> ```
+> http://localhost:3001/api/auth/sso/post-logout
+> https://df-sso-login-test.apps.zerozero.tw/api/auth/sso/post-logout
+> https://df-sso-login.apps.zerozero.tw/api/auth/sso/post-logout
+> ```
+>
+> 各 Client App 的最終 `redirect` 不需要登記（由 SSO `/post-logout` 跳板讀
+> `sso_allowed_list` 動態驗證），維持「`sso_allowed_list` 為單一事實來源」。
 
 ### Session 過期
 

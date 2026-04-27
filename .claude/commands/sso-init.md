@@ -152,25 +152,38 @@ export const GET = withAuth(async (_req, user) => NextResponse.json({ user }));
 
 ### 4. 建立 `app/api/auth/logout/route.ts`
 
-必須 POST 中央 `/logout` 才算真的登出（契約 #2）。
+必須 POST 中央 `/logout` **並把瀏覽器導去 SSO 回傳的 `logout_url`**（OIDC RP-Initiated Logout，契約 #2）。
+只 POST 不導 `logout_url` 等於沒登 AD，使用者重新整理會被 AD 靜默拉回登入。
 
 ```typescript
 import { NextResponse } from "next/server";
 import { getToken, fetchSSO } from "../../../../lib/sso";
 
 const APP_URL = process.env.APP_URL!;
+const FALLBACK_REDIRECT = `${APP_URL}/?logged_out=1`;
 
 export async function GET() {
   const token = await getToken();
+  let redirectTarget = FALLBACK_REDIRECT;
+
   if (token) {
     try {
-      await fetchSSO("/api/auth/logout", {
+      const res = await fetchSSO("/api/auth/logout", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ redirect: FALLBACK_REDIRECT }),
       });
-    } catch { /* 網路失敗忽略，本地 cookie 仍要清 */ }
+      if (res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { logout_url?: string };
+        if (data.logout_url) redirectTarget = data.logout_url;
+      }
+    } catch { /* 網路失敗忽略，本地 cookie 仍要清，落地 fallback URL */ }
   }
-  const response = NextResponse.redirect(new URL("/?logged_out=1", APP_URL));
+
+  const response = NextResponse.redirect(redirectTarget);
   response.cookies.delete("token");
   return response;
 }

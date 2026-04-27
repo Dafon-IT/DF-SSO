@@ -95,10 +95,24 @@ export default function DashboardPage() {
   }, [router]);
 
   const handleLogout = async () => {
-    await fetch(`${API}/api/auth/logout`, {
-      method: "POST",
-      credentials: "include",
-    });
+    // 請 SSO 回傳 Microsoft AD 的登出 URL，再導瀏覽器過去
+    // AD 登出 SSO cookie 後會經 /post-logout 跳板回到 SSO 管理後台首頁
+    // 不走 AD 登出的話，下次再開管理後台會被 AD 靜默重新登入
+    try {
+      const res = await fetch(`${API}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ redirect: window.location.origin }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { logout_url?: string };
+      if (data.logout_url) {
+        window.location.href = data.logout_url;
+        return;
+      }
+    } catch {
+      // SSO 不可達也至少清掉前端狀態並回首頁
+    }
     router.push("/");
   };
 

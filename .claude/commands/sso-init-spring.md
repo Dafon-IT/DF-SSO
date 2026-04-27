@@ -150,17 +150,30 @@ public class SsoClient {
                 .block();
     }
 
-    /** 通知 SSO 登出（best-effort，失敗不拋出）。 */
-    public void logout(String token) {
+    /**
+     * 通知 SSO 登出，並回傳 SSO 給的 Microsoft AD logout_url（包含 id_token_hint
+     * 和 SSO post-logout 跳板）。Controller 必須把瀏覽器導向這個 URL，AD 才會清
+     * 掉自己的 SSO cookie，否則使用者 Refresh 會被 AD 靜默重新登入。
+     *
+     * @param token  Bearer token
+     * @param redirectAfter  AD 登出後最終要落地的 URL（必須在 sso_allowed_list）
+     * @return logout_url；SSO 不可達或未回傳則回 null
+     */
+    @SuppressWarnings("unchecked")
+    public String logout(String token, String redirectAfter) {
         try {
-            webClient.post()
+            Map<String, Object> body = webClient.post()
                     .uri("/api/auth/logout")
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .header(HttpHeaders.CONTENT_TYPE, "application/json")
+                    .bodyValue(Map.of("redirect", redirectAfter))
                     .retrieve()
-                    .bodyToMono(Void.class)
+                    .bodyToMono(Map.class)
                     .block();
+            Object url = body == null ? null : body.get("logout_url");
+            return url instanceof String s ? s : null;
         } catch (Exception ignored) {
-            // best-effort，SSO 不通也要清 cookie
+            return null;
         }
     }
 }
@@ -396,13 +409,24 @@ public class SsoController {
         return ResponseEntity.ok(Map.of("user", user));
     }
 
-    /** 3. /logout：通知 SSO，清 cookie，導回首頁 */
+    /**
+     * 3. /logout：通知 SSO，清 cookie，把瀏覽器導向 SSO 回傳的 AD logout_url
+     *    （AD 清完自己的 SSO cookie 後會經 SSO post-logout 跳板回到 /?logged_out=1）。
+     *    取不到 logout_url 時 fallback 直接回首頁。
+     */
     @GetMapping("/logout")
     public void logout(HttpServletRequest req, HttpServletResponse res) throws IOException {
         String token = SsoCookieUtil.readToken(req);
-        if (token != null) ssoClient.logout(token);
+        String fallback = props.getAppUrl() + "/?logged_out=1";
+        String logoutUrl = null;
+        if (token != null) logoutUrl = ssoClient.logout(token, fallback);
         SsoCookieUtil.clearToken(res, isSecure());
-        redirect(res, "/?logged_out=1");
+        if (logoutUrl != null) {
+            // logoutUrl 是完整 URL（Microsoft endpoint），不可再前綴 app-url
+            res.sendRedirect(logoutUrl);
+        } else {
+            redirect(res, "/?logged_out=1");
+        }
     }
 
     /** 4. back-channel logout：SSO 廣播登出，驗 HMAC 後清自家 session */

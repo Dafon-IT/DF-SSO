@@ -133,16 +133,31 @@ async def me(token: str) -> tuple[int, dict[str, Any] | None]:
     return 200, res.json()
 
 
-async def logout(token: str) -> None:
-    """通知 SSO 登出(best-effort,失敗吞掉)。"""
+async def logout(token: str, redirect_after: str) -> str | None:
+    """通知 SSO 登出,並回傳 SSO 給的 Microsoft AD logout_url(含 id_token_hint
+    + SSO post-logout 跳板)。Caller 必須把瀏覽器導去這個 URL,否則 AD 端
+    SSO cookie 沒清掉,使用者 Refresh 會被靜默重新登入。
+
+    redirect_after: AD 登出後最終要落地的 URL(必須在 sso_allowed_list)
+    回傳: logout_url;SSO 不可達或 200 但缺欄位則回 None
+    """
     try:
-        await _request(
+        res = await _request(
             "POST",
             "/api/auth/logout",
-            headers={"Authorization": f"Bearer {token}"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={"redirect": redirect_after},
         )
+        if res.status_code != 200:
+            return None
+        body = res.json()
+        url = body.get("logout_url") if isinstance(body, dict) else None
+        return url if isinstance(url, str) else None
     except Exception:
-        pass
+        return None
 ```
 
 ### 4. 建立 `{APP_DIR}/sso/security.py`
@@ -321,10 +336,18 @@ async def me(user: SsoUser = Depends(require_auth)) -> dict:
 # ---------- 3. /logout ----------
 @router.get("/logout")
 async def logout(token: str | None = Cookie(default=None)) -> Response:
-    """通知 SSO 登出,清自家 cookie,導回首頁。"""
+    """通知 SSO 登出,清自家 cookie,把瀏覽器導向 SSO 給的 AD logout_url。
+    AD 清完自己的 SSO cookie 後會經 SSO post-logout 跳板回到 /?logged_out=1。
+    取不到 logout_url 時 fallback 直接回首頁(此時 AD session 仍活著,
+    使用者重新整理可能會被靜默重登)。
+    """
+    fallback = f"{sso_settings.app_url}/?logged_out=1"
+    target = fallback
     if token:
-        await client.logout(token)
-    resp = RedirectResponse(url=f"{sso_settings.app_url}/?logged_out=1", status_code=302)
+        url = await client.logout(token, fallback)
+        if url:
+            target = url
+    resp = RedirectResponse(url=target, status_code=302)
     _clear_token_cookie(resp)
     return resp
 

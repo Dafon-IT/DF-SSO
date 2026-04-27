@@ -20,7 +20,7 @@
 中央**無法強制驗證** Client 是否遵守，全靠自律實作：
 
 1. **`/api/auth/me` 即時回源中央**：本地 handler 必須以 `Authorization: Bearer <token>` 轉發到中央。中央 Redis 是唯一事實來源，**JWT 簽名有效 ≠ session 仍存在**。
-2. **登出必須 POST 中央 `/api/auth/logout`**：只清本地 cookie 等於沒登出，使用者回到登入頁會被靜默拉回登入狀態。
+2. **登出必須 POST 中央 `/api/auth/logout` + 把瀏覽器導向回應的 `logout_url`**：只 POST 不導 `logout_url` 等於沒登 AD，使用者重新整理仍會被 AD 靜默拉回登入狀態。
 3. **Back-channel logout 必須驗 HMAC + timestamp**：否則任何人都能偽造登出把使用者踢掉。
 
 ---
@@ -270,23 +270,43 @@ export async function GET(request: NextRequest) {
 
 ### `app/api/auth/logout/route.ts`
 
+> 登出必須走 Microsoft AD `end_session_endpoint` 才能清掉 `login.microsoftonline.com`
+> 上的 SSO cookie，否則使用者重新整理會被 AD 靜默拉回登入狀態。SSO `POST /api/auth/logout`
+> 會回傳 `logout_url`（已含 `id_token_hint` + 跳板 URL），Client 端**只需把瀏覽器導去那裡**。
+
 ```typescript
 import { NextResponse } from "next/server";
 import { getToken, fetchSSO } from "../../../../lib/sso";
 
 const APP_URL = process.env.APP_URL!;
+const FALLBACK_REDIRECT = `${APP_URL}/?logged_out=1`;
 
 export async function GET() {
   const token = await getToken();
+  let redirectTarget = FALLBACK_REDIRECT;
+
   if (token) {
     try {
-      await fetchSSO("/api/auth/logout", {
+      const res = await fetchSSO("/api/auth/logout", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ redirect: FALLBACK_REDIRECT }),
       });
-    } catch { /* 忽略網路錯誤，本地 cookie 仍要清 */ }
+      if (res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          logout_url?: string;
+        };
+        if (data.logout_url) redirectTarget = data.logout_url;
+      }
+    } catch {
+      // SSO 不可達也繼續清本地 cookie，落地 fallback URL
+    }
   }
-  const response = NextResponse.redirect(new URL("/?logged_out=1", APP_URL));
+
+  const response = NextResponse.redirect(redirectTarget);
   response.cookies.delete("token");
   return response;
 }

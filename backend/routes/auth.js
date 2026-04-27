@@ -8,6 +8,7 @@ import loginLogService from '../services/loginLog.js';
 import erpApi from '../services/erpApi.js';
 import allowedListService from '../services/allowedList.js';
 import adminManager from '../services/adminManager.js';
+import { buildMicrosoftLogoutUrl } from '../services/microsoftLogout.js';
 
 const router = express.Router();
 
@@ -202,6 +203,9 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
     email: email,
     name: claims.name,
     erpData: erpData,
+    // Microsoft id_token：登出時帶 id_token_hint 給 AD end_session_endpoint，
+    // AD 才知道是哪個帳號要登出（否則會跳帳號選單）
+    microsoftIdToken: tokenResponse.idToken || null,
     loginLogUid: logRecord?.uid || null,
     loginAt: new Date().toISOString(),
   };
@@ -299,9 +303,18 @@ router.get('/me', async (req, res) => {
 /**
  * POST /api/auth/logout
  * 登出：清除 Redis Session + Cookie + Back-channel 通知其他 Client App
- * 支援兩種方式：
+ * 同時建構 Microsoft RP-Initiated Logout URL 回傳給呼叫方，
+ * 由呼叫方把瀏覽器導向該 URL（清除 AD 端的 SSO cookie，避免靜默重新登入）
+ *
+ * 支援兩種 token 來源：
  *   1. Cookie: token（SSO Frontend 使用）
  *   2. Authorization: Bearer <token>（Client App server-to-server 使用）
+ *
+ * Body / Query: { redirect?: string }
+ *   AD 登出後最終要落地的 URL（origin 必須在 sso_allowed_list）。
+ *   未提供時 fallback 到 SSO frontend。
+ *
+ * Response: { message: string, logout_url: string }
  */
 router.post('/logout', async (req, res) => {
   let token = req.cookies.token;
@@ -313,11 +326,24 @@ router.post('/logout', async (req, res) => {
   }
 
   let userId = null;
+  let microsoftIdToken = null;
 
   if (token) {
     try {
       const decoded = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
       userId = decoded.userId;
+
+      // 在刪除前先讀出 Microsoft id_token（給 AD logout 用作 id_token_hint）
+      const sessionStr = await redis.get(`${SESSION_PREFIX}${decoded.userId}`);
+      if (sessionStr) {
+        try {
+          const session = JSON.parse(sessionStr);
+          microsoftIdToken = session.microsoftIdToken || null;
+        } catch {
+          // session 格式異常，繼續走流程
+        }
+      }
+
       await redis.del(`${SESSION_PREFIX}${decoded.userId}`);
     } catch {
       // token 無效也繼續清除 cookie
@@ -352,7 +378,32 @@ router.post('/logout', async (req, res) => {
   }
 
   res.clearCookie('token', { ...(config.cookieDomain && { domain: config.cookieDomain }), path: '/' });
-  res.json({ message: 'Logged out' });
+
+  // 驗證最終 redirect（origin 必須在白名單），決定 AD 登出後落地位置
+  const requestedRedirect =
+    (req.body && typeof req.body.redirect === 'string' && req.body.redirect) ||
+    (typeof req.query.redirect === 'string' && req.query.redirect) ||
+    '';
+
+  let finalRedirect = config.frontendUrl;
+  if (requestedRedirect) {
+    try {
+      const parsed = new URL(requestedRedirect);
+      if (['http:', 'https:'].includes(parsed.protocol)) {
+        const origins = await allowedListService.getAllOrigins();
+        if (origins.includes(parsed.origin) || parsed.origin === config.frontendUrl) {
+          finalRedirect = requestedRedirect;
+        } else {
+          console.warn(`Blocked logout redirect to unauthorized origin: ${parsed.origin}`);
+        }
+      }
+    } catch {
+      console.warn('Invalid redirect URL in logout request');
+    }
+  }
+
+  const logoutUrl = buildMicrosoftLogoutUrl(microsoftIdToken, finalRedirect);
+  res.json({ message: 'Logged out', logout_url: logoutUrl });
 });
 
 export default router;
