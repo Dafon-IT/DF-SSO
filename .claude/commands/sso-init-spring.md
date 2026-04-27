@@ -151,13 +151,13 @@ public class SsoClient {
     }
 
     /**
-     * 通知 SSO 登出，並回傳 SSO 給的 Microsoft AD logout_url（包含 id_token_hint
-     * 和 SSO post-logout 跳板）。Controller 必須把瀏覽器導向這個 URL，AD 才會清
-     * 掉自己的 SSO cookie，否則使用者 Refresh 會被 AD 靜默重新登入。
+     * 通知 SSO 登出（兩層 Session 模型）：中央刪 Redis session + back-channel 通知所有 App。
+     * AD session 完全不動。SSO 回傳已驗證 origin 的 redirect URL，Controller 把瀏覽器
+     * 302 過去即可。「登出真的有效」靠 Client App 端登入頁不自動 redirect 到 /authorize 的契約。
      *
      * @param token  Bearer token
-     * @param redirectAfter  AD 登出後最終要落地的 URL（必須在 sso_allowed_list）
-     * @return logout_url；SSO 不可達或未回傳則回 null
+     * @param redirectAfter  登出後最終要落地的 URL（origin 必須在 sso_allowed_list）
+     * @return SSO 驗證後的 redirect；SSO 不可達或未回傳則回 null
      */
     @SuppressWarnings("unchecked")
     public String logout(String token, String redirectAfter) {
@@ -170,7 +170,7 @@ public class SsoClient {
                     .retrieve()
                     .bodyToMono(Map.class)
                     .block();
-            Object url = body == null ? null : body.get("logout_url");
+            Object url = body == null ? null : body.get("redirect");
             return url instanceof String s ? s : null;
         } catch (Exception ignored) {
             return null;
@@ -410,20 +410,21 @@ public class SsoController {
     }
 
     /**
-     * 3. /logout：通知 SSO，清 cookie，把瀏覽器導向 SSO 回傳的 AD logout_url
-     *    （AD 清完自己的 SSO cookie 後會經 SSO post-logout 跳板回到 /?logged_out=1）。
-     *    取不到 logout_url 時 fallback 直接回首頁。
+     * 3. /logout（兩層 Session 模型）：
+     *    通知 SSO 刪中央 session + back-channel 通知所有 App，清本地 cookie，導向 SSO 回傳的 redirect。
+     *    AD session 不動。「登出真的有效」靠登入頁不自動 redirect 到 /authorize 的契約。
+     *    取不到 redirect 時 fallback 回首頁帶 ?logged_out=1。
      */
     @GetMapping("/logout")
     public void logout(HttpServletRequest req, HttpServletResponse res) throws IOException {
         String token = SsoCookieUtil.readToken(req);
         String fallback = props.getAppUrl() + "/?logged_out=1";
-        String logoutUrl = null;
-        if (token != null) logoutUrl = ssoClient.logout(token, fallback);
+        String redirectUrl = null;
+        if (token != null) redirectUrl = ssoClient.logout(token, fallback);
         SsoCookieUtil.clearToken(res, isSecure());
-        if (logoutUrl != null) {
-            // logoutUrl 是完整 URL（Microsoft endpoint），不可再前綴 app-url
-            res.sendRedirect(logoutUrl);
+        if (redirectUrl != null) {
+            // redirectUrl 是完整 URL（已含 path/query），不可再前綴 app-url
+            res.sendRedirect(redirectUrl);
         } else {
             redirect(res, "/?logged_out=1");
         }
@@ -616,12 +617,18 @@ APP_URL={使用者填的 App URL}
 
    <button onClick={() => window.location.href = ssoUrl}>透過 DF-SSO 登入</button>
 
-5. 在需要驗證的頁面呼叫：
+5. 在需要驗證的頁面呼叫（受保護頁面 → 失敗回登入頁；登入頁失敗 → 顯示按鈕，不可自動 redirect 到 ssoUrl）：
 
+   // 受保護頁面（dashboard 等）
    fetch("/api/auth/me", { credentials: "include" })
      .then(res => res.ok ? res.json() : Promise.reject())
      .then(data => setUser(data.user))
-     .catch(() => window.location.href = ssoUrl);
+     .catch(() => window.location.href = "/");  // 回首頁讓使用者看到登入按鈕
+
+   // 登入頁（首頁）：已登入直接進 dashboard，否則一律顯示按鈕（不可自動 redirect 到 ssoUrl，否則登出無效）
+   fetch("/api/auth/me", { credentials: "include" })
+     .then(res => { if (res.ok) location.href = "/dashboard"; })
+     .catch(() => {});
 
 6. 登出按鈕：
 

@@ -142,50 +142,67 @@
   → App-B exchange { code, client_id, client_secret } → 存 token → Dashboard
 ```
 
-### 登出流程（含 OIDC RP-Initiated Logout）
+### 登出流程（兩層 Session 模型）
 
 ```
 App-A 點登出 → /api/auth/logout
   → 讀本地 token → POST SSO /api/auth/logout (Bearer)
                   body: { redirect: "<APP_URL>/?logged_out=1" }
-  → SSO 刪除 Redis session（讀出 microsoftIdToken 後再 del）
+  → SSO 刪除 Redis session（sso:session:{userId}）
   → SSO back-channel POST 所有 App /api/auth/back-channel-logout
     { user_id, timestamp, signature }  ← HMAC-SHA256(app_secret, user_id:timestamp)
-  → SSO 驗證 redirect origin 在 sso_allowed_list，建構 AD logout_url：
-    https://login.microsoftonline.com/{tenant}/oauth2/v2.0/logout
-      ?id_token_hint={microsoftIdToken}
-      &post_logout_redirect_uri={SSO}/api/auth/sso/post-logout?redirect=...
-    回傳 { message, logout_url }
-  → App-A 清除本地 cookie → 302 logout_url
-  → 瀏覽器訪問 Microsoft → AD 清掉自己的 SSO cookie → 302 SSO /post-logout
-  → SSO /post-logout 再次驗證 redirect origin → 302 到 <APP_URL>/?logged_out=1
-
-關鍵：必須走 AD 端 logout 才會清掉 login.microsoftonline.com 上的 SSO cookie，
-否則下次任何 App 走 /authorize 會被 AD 靜默重新登入（silent SSO）。
+  → SSO 驗證 redirect origin 在 sso_allowed_list（剝除 path/query/fragment）
+  → 回傳 { message, redirect: "<APP_ORIGIN>/?logged_out=1" }
+  → App-A 清除本地 cookie → 302 redirect
 ```
 
-> **Azure App Registration 設定要求：**
->
-> Azure Portal → App Registrations → 你的 SSO App → **Authentication** →
-> **Front-channel logout URL**（或 post logout redirect URIs）需要登記：
->
-> ```
-> http://localhost:3001/api/auth/sso/post-logout
-> https://df-sso-login-test.apps.zerozero.tw/api/auth/sso/post-logout
-> https://df-sso-login.apps.zerozero.tw/api/auth/sso/post-logout
-> ```
->
-> 各 Client App 的最終 `redirect` 不需要登記（由 SSO `/post-logout` 跳板讀
-> `sso_allowed_list` 動態驗證），維持「`sso_allowed_list` 為單一事實來源」。
+**設計原則：登出只清「中央 + App 兩層」，不動 AD（Microsoft）那層。**
 
-### Session 過期
+| 層級 | 由誰維護 | 登出時 |
+|------|----------|--------|
+| AD session | Microsoft（長壽） | **不動** — 避免使用者每次登入都被迫重打密碼 / MFA / passkey |
+| 中央 SSO session | DF-SSO Redis（key = `sso:session:{userId}`） | **刪除** |
+| App session | 各 Client App cookie | back-channel 收到通知後刪除 |
+
+**「登出真的有效」由 Client App 端契約保障**（見下節 [Client App 登入頁契約](#client-app-登入頁契約)）：
+back-channel 已清掉 App 本地 cookie，App **必須顯示自家登入頁**，**不可** 自動 redirect 到 `/authorize`。
+使用者必須在 App 登入頁主動點「登入」才會重新觸發 OAuth flow。
+
+### Client App 登入頁契約
+
+每個整合 SSO 的 Client App **必須遵守** 以下契約，否則「登出」會等同無效（lazy App 自動 redirect → AD silent → 立刻又回到 Dashboard）：
+
+| 情境 | App 端正確行為 | 錯誤行為（會破壞 logout） |
+|------|----------------|----------------------------|
+| `/api/auth/me` 回 `401 no_token`（沒 cookie，含登出後） | **顯示 App 自家登入首頁**，等使用者點「登入」按鈕 | 自動 `window.location = SSO_URL/authorize?...` |
+| `/api/auth/me` 回 `401 session_expired`（有本地 token 但中央 session 過期 / 被登出） | 清除本地 cookie 後，導回首頁 → 觸發上面 `no_token` 流程 | 同上自動 redirect |
+| 收到 back-channel logout（`/api/auth/back-channel-logout`） | 驗 HMAC + timestamp 後刪除該 user_id 的本地 session | 不驗簽 / 不驗 timestamp |
+
+> 範本實作見 [INTEGRATION.md](../INTEGRATION.md) 的 `LoginPage` component 與 middleware。
+
+### 兩種 401 情境對照
 
 ```
-/api/auth/me → SSO Redis session 過期 → 401 "session_expired"
-  → Client 清除本地 token → 回首頁
-  → /api/auth/me → "no_token"（不是 session_expired）
-  → 自動導向 SSO → SSO 有中央 cookie → 靜默重新登入
+情境 A：中央 session 自然過期（24h TTL 到）
+  /api/auth/me → SSO Redis sso:session:{userId} 不存在 → 401 "session_expired"
+    → Client 清除本地 token → 回首頁
+    → /api/auth/me → 401 "no_token"
+    → 顯示登入頁 → 使用者點「登入」
+    → /authorize → AD silent SSO → callback → 建立新 session → Dashboard
+    （AD session 還在，所以 AD 那關不會跳出畫面）
+
+情境 B：使用者按了登出
+  App-A 觸發登出 → 中央刪 sso:session + back-channel 全部 App
+    → App-B 本地 cookie 也被清掉
+    → 使用者下次回到 App-B：
+       /api/auth/me → 401 "no_token"
+       → 顯示登入頁 → 使用者點「登入」
+       → /authorize → AD silent SSO → callback → 建立新 session → Dashboard
+       （和情境 A 一模一樣，差別只在「使用者必須親自點登入」是 logout 的核心保護）
 ```
+
+> 兩種情境在 backend 行為完全一致（都是「沒中央 session → 走 OAuth 重建」），
+> 差別純粹在 App 端：**登出後 App 必須讓使用者看到登入頁**，不能偷偷 silent re-login。
 
 ---
 

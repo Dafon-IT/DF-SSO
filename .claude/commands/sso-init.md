@@ -152,8 +152,7 @@ export const GET = withAuth(async (_req, user) => NextResponse.json({ user }));
 
 ### 4. 建立 `app/api/auth/logout/route.ts`
 
-必須 POST 中央 `/logout` **並把瀏覽器導去 SSO 回傳的 `logout_url`**（OIDC RP-Initiated Logout，契約 #2）。
-只 POST 不導 `logout_url` 等於沒登 AD，使用者重新整理會被 AD 靜默拉回登入。
+兩層 Session 模型：POST 中央 `/logout` → 中央刪 Redis session + back-channel → 回傳 `{ message, redirect }` → 把瀏覽器導向 `redirect`（契約 #2）。**AD session 完全不動**。
 
 ```typescript
 import { NextResponse } from "next/server";
@@ -177,8 +176,8 @@ export async function GET() {
         body: JSON.stringify({ redirect: FALLBACK_REDIRECT }),
       });
       if (res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { logout_url?: string };
-        if (data.logout_url) redirectTarget = data.logout_url;
+        const data = (await res.json().catch(() => ({}))) as { redirect?: string };
+        if (data.redirect) redirectTarget = data.redirect;
       }
     } catch { /* 網路失敗忽略，本地 cookie 仍要清，落地 fallback URL */ }
   }
@@ -191,7 +190,7 @@ export async function GET() {
 
 ### 5. 建立 `app/api/auth/back-channel-logout/route.ts`
 
-**必須**驗 HMAC + timestamp（契約 #3），否則任何人都能偽造登出。
+**必須**驗 HMAC + timestamp（契約 #4），否則任何人都能偽造登出。
 
 ```typescript
 import { NextRequest, NextResponse } from "next/server";
@@ -233,7 +232,7 @@ export async function POST(request: NextRequest) {
 
 ### 6. 建立登入頁 `app/page.tsx`
 
-核心判斷順序：**`if (res.ok) → /dashboard` 在前、`if (loggedOut) → 顯示按鈕` 在後**。禁止調換順序（會讓登出後的 F5 永遠卡在登入頁）。
+**契約 #3**：沒 session 時**只顯示按鈕**。禁止 `window.location = ssoUrl` 自動 redirect（兩層 Session 模型下，AD silent SSO 永遠成功，自動 redirect = 登出無效）。判斷只有 `if (res.ok) → /dashboard`，`else → 顯示按鈕`。
 
 ```tsx
 "use client";
@@ -248,24 +247,18 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const error = searchParams.get("error");
-  const loggedOut = searchParams.get("logged_out");
   const [checking, setChecking] = useState(true);
 
   const ssoUrl = `${SSO_URL}/api/auth/sso/authorize?client_id=${encodeURIComponent(SSO_APP_ID)}&redirect_uri=${encodeURIComponent(`${APP_URL}/api/auth/callback`)}`;
 
   useEffect(() => {
     fetch("/api/auth/me")
-      .then(async (res) => {
-        if (res.ok) { router.push("/dashboard"); return; }
-        const data = await res.json().catch(() => ({}));
-        if (data.error === "session_expired" || error || loggedOut) {
-          setChecking(false); // 顯示登入按鈕
-        } else {
-          window.location.href = ssoUrl; // no_token → 靜默導向 SSO
-        }
+      .then((res) => {
+        if (res.ok) router.push("/dashboard");
+        else setChecking(false); // 一律顯示按鈕，不自動 redirect（契約 #3）
       })
       .catch(() => setChecking(false));
-  }, [router, error, loggedOut, ssoUrl]);
+  }, [router]);
 
   if (checking) return <p>驗證中...</p>;
 
@@ -278,7 +271,7 @@ export default function LoginPage() {
 }
 ```
 
-> 若專案已有 `app/page.tsx`，請詢問使用者是否覆蓋；不覆蓋就把上面的 `useEffect` 邏輯整合到既有的登入頁。
+> 若專案已有 `app/page.tsx`，請詢問使用者是否覆蓋；不覆蓋就把上面的 `useEffect` 邏輯整合到既有的登入頁（**禁止** 在 401 時自動 `window.location = ssoUrl`）。
 
 ### 7. 建立或更新 `.env.local`
 
@@ -365,7 +358,7 @@ NEXT_PUBLIC_APP_URL={使用者填的 App URL}
 - **禁止 Next.js `middleware.ts`**：edge runtime 沒 Node `crypto`、cookie 清除 + redirect 難處理。`withAuth` HOF 跑 Node runtime，可預測、可測試。
 - **Cookie 名固定為 `token`**：對齊 [INTEGRATION.md](../../INTEGRATION.md)，若改名要同時改 `TOKEN_COOKIE` 常數與 callback/logout/withAuth 三處。
 - **所有 protected handler 都要 `withAuth(...)`**：**禁止**自行 `fetch(... /me)` 或直接讀 cookie，否則容易漏寫「session 被撤銷時清本地 cookie」。
-- **no_token vs session_expired 的差異不可合併**：前端看 `no_token` 會自動導向 SSO（跨 App 免登入），看 `session_expired` 會顯示按鈕避免死循環。
+- **登入頁不可自動 redirect 到 `/authorize`**：兩層 Session 模型下，AD silent SSO 永遠成功，登入頁自動 redirect 等於 logout 無效。跨 App 第一次訪問的「多 1 click」是換取 logout 真有效的代價。
 - **每次 request 都回源**：正確行為。流量大時可在 `requireAuth` 加 in-process 短 TTL 快取（代價：登出感知延遲），敏感操作務必 bypass。
 - **back-channel TODO**：若本地用 Redis / DB 存 session，收到 HMAC-verified 請求後要實際 invalidate 該 `user_id`。
 - **目錄已存在同名檔**：先詢問使用者是否覆蓋。

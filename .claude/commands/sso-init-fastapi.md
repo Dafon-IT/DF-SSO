@@ -134,12 +134,12 @@ async def me(token: str) -> tuple[int, dict[str, Any] | None]:
 
 
 async def logout(token: str, redirect_after: str) -> str | None:
-    """通知 SSO 登出,並回傳 SSO 給的 Microsoft AD logout_url(含 id_token_hint
-    + SSO post-logout 跳板)。Caller 必須把瀏覽器導去這個 URL,否則 AD 端
-    SSO cookie 沒清掉,使用者 Refresh 會被靜默重新登入。
+    """通知 SSO 登出（兩層 Session 模型）：中央刪 Redis session + back-channel 通知所有 App。
+    AD session 完全不動。SSO 回傳已驗證 origin 的 redirect URL,Caller 把瀏覽器 302 過去即可。
+    「登出真的有效」靠 Client App 端登入頁不自動 redirect 到 /authorize 的契約。
 
-    redirect_after: AD 登出後最終要落地的 URL(必須在 sso_allowed_list)
-    回傳: logout_url;SSO 不可達或 200 但缺欄位則回 None
+    redirect_after: 登出後最終要落地的 URL(origin 必須在 sso_allowed_list)
+    回傳: SSO 驗證後的 redirect;SSO 不可達或 200 但缺欄位則回 None
     """
     try:
         res = await _request(
@@ -154,7 +154,7 @@ async def logout(token: str, redirect_after: str) -> str | None:
         if res.status_code != 200:
             return None
         body = res.json()
-        url = body.get("logout_url") if isinstance(body, dict) else None
+        url = body.get("redirect") if isinstance(body, dict) else None
         return url if isinstance(url, str) else None
     except Exception:
         return None
@@ -336,10 +336,10 @@ async def me(user: SsoUser = Depends(require_auth)) -> dict:
 # ---------- 3. /logout ----------
 @router.get("/logout")
 async def logout(token: str | None = Cookie(default=None)) -> Response:
-    """通知 SSO 登出,清自家 cookie,把瀏覽器導向 SSO 給的 AD logout_url。
-    AD 清完自己的 SSO cookie 後會經 SSO post-logout 跳板回到 /?logged_out=1。
-    取不到 logout_url 時 fallback 直接回首頁(此時 AD session 仍活著,
-    使用者重新整理可能會被靜默重登)。
+    """通知 SSO 登出（兩層 Session 模型）：中央刪 Redis session + back-channel 通知所有 App,
+    清自家 cookie,把瀏覽器導向 SSO 回傳的 redirect。AD session 不動。
+    「登出真的有效」靠登入頁不自動 redirect 到 /authorize 的契約。
+    取不到 redirect 時 fallback 回首頁帶 ?logged_out=1。
     """
     fallback = f"{sso_settings.app_url}/?logged_out=1"
     target = fallback
@@ -487,7 +487,7 @@ APP_URL={使用者填的 App URL}
 - **Async vs sync**:`httpx.AsyncClient` 對齊 FastAPI 的 async-first 設計。若你的專案是純同步(例如 Flask 或用 `def` 而不是 `async def`),把 `httpx.AsyncClient` 換成 `httpx.Client`、把 router 的 `async def` 改成 `def`,其他邏輯完全一樣
 - **Cookie secure 旗標**:`SsoSettings.is_secure` 依 `app_url` 協定自動決定;Prod `https://` 會自動打開,本機 `http://` 不會(否則瀏覽器不會送 cookie)
 - **SameSite**:固定 `Lax`,對齊 [INTEGRATION.md](../../INTEGRATION.md)。跨 domain iframe 嵌入才需 `None`+`Secure`
-- **`no_token` vs `session_expired`**:這個區分務必保留。前端看到 `no_token` 要自動導向 SSO(跨 App 免登入體驗),看到 `session_expired` 要顯示按鈕避免無限重導
+- **登入頁不可自動 redirect 到 `/authorize`**:兩層 Session 模型下 AD silent SSO 永遠成功,登入頁自動 redirect 等於 logout 無效。登入頁的正確邏輯是「`/me` 200 → `/dashboard`,其餘一律顯示按鈕讓使用者親自點擊」。跨 App 第一次訪問多 1 click 是換取 logout 真有效的合理代價
 - **back-channel logout 的 TODO**:若你用 Redis / DB 存 server-side session,在 `back_channel_logout` 裡要實際去清該 `user_id` 的 session,不然只是回 200 並沒有真的登出本地
 - **HMAC constant-time compare**:`hmac.compare_digest` 是 Python 標準函式庫內建的 constant-time 比對,對齊 SSO backend 的 `crypto.timingSafeEqual`
 - **pydantic-settings 版本**:範例用 Pydantic v2 的 `pydantic-settings`。若卡在 Pydantic v1,請改成 `from pydantic import BaseSettings` 並移除 `SettingsConfigDict`

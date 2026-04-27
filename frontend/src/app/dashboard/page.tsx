@@ -95,19 +95,18 @@ export default function DashboardPage() {
   }, [router]);
 
   const handleLogout = async () => {
-    // 請 SSO 回傳 Microsoft AD 的登出 URL，再導瀏覽器過去
-    // AD 登出 SSO cookie 後會經 /post-logout 跳板回到 SSO 管理後台首頁
-    // 不走 AD 登出的話，下次再開管理後台會被 AD 靜默重新登入
+    // 兩層 Session 模型：中央回傳驗證後的 redirect URL，瀏覽器導過去即可（AD session 不動）
+    // 登入頁本身不會自動 redirect 到 /authorize，所以 silent re-login 自然被擋下
     try {
       const res = await fetch(`${API}/api/auth/logout`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ redirect: window.location.origin }),
+        body: JSON.stringify({ redirect: `${window.location.origin}/?logged_out=1` }),
       });
-      const data = (await res.json().catch(() => ({}))) as { logout_url?: string };
-      if (data.logout_url) {
-        window.location.href = data.logout_url;
+      const data = (await res.json().catch(() => ({}))) as { redirect?: string };
+      if (data.redirect) {
+        window.location.href = data.redirect;
         return;
       }
     } catch {

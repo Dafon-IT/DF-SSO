@@ -20,8 +20,11 @@
 中央**無法強制驗證** Client 是否遵守，全靠自律實作：
 
 1. **`/api/auth/me` 即時回源中央**：本地 handler 必須以 `Authorization: Bearer <token>` 轉發到中央。中央 Redis 是唯一事實來源，**JWT 簽名有效 ≠ session 仍存在**。
-2. **登出必須 POST 中央 `/api/auth/logout` + 把瀏覽器導向回應的 `logout_url`**：只 POST 不導 `logout_url` 等於沒登 AD，使用者重新整理仍會被 AD 靜默拉回登入狀態。
-3. **Back-channel logout 必須驗 HMAC + timestamp**：否則任何人都能偽造登出把使用者踢掉。
+2. **登出必須 POST 中央 `/api/auth/logout` + 把瀏覽器導向回應的 `redirect`**：只清本地 cookie 不通知中央 → 中央 Redis session 還活著，下次任何 App 走 `/authorize` 會被靜默重新登入。
+3. **登入頁（`/`）在沒有 session 時必須顯示登入按鈕，不可自動 `window.location = SSO/authorize?...`**：兩層 Session 模型下，「登出真的有效」完全靠這條。lazy 自動 redirect → AD silent SSO → 立刻又回到 dashboard，等於沒登出。
+4. **Back-channel logout 必須驗 HMAC + timestamp**：否則任何人都能偽造登出把使用者踢掉。
+
+> 「兩層 Session 模型」說明見中央 [docs/Design.md](docs/Design.md) 的「登出流程」章節：登出只清中央 Redis session + 各 App cookie，**完全不動 AD（Microsoft）那層**，避免使用者每次登入都被迫重打密碼 / MFA。
 
 ---
 
@@ -67,12 +70,12 @@ NEXT_PUBLIC_APP_URL=https://warehouse.apps.zerozero.tw
 
 | 路徑 | 用途 | 進入時機 |
 |------|------|---------|
-| `/` | 登入頁 | 登出 / session 過期 / exchange 失敗 |
+| `/` | 登入頁 | 第一次進站 / 登出 / session 過期 / exchange 失敗 |
 | `/dashboard` | 登入後首頁 | OAuth callback 換 token 成功 |
 
-- `/` mount 時呼叫 `/api/auth/me`：已登入 → `router.push("/dashboard")`；`no_token` → 自動導向 SSO `authorize`（享受跨 App 免登入）；`session_expired` / `error` / `logged_out=1` → 顯示按鈕（**不**自動導向）
+- `/` mount 時呼叫 `/api/auth/me`：**已登入 → `router.push("/dashboard")`；其餘一律顯示登入按鈕**（契約 #3，不可自動 redirect 到 SSO）
 - `/dashboard` mount 時呼叫 `/api/auth/me`：失敗則導回 `/`
-- 錯誤 query：`?error=no_code | exchange_failed | exchange_error | session_expired` / `?logged_out=1`
+- 錯誤 query：`?error=no_code | exchange_failed | exchange_error` / `?logged_out=1`（只用於顯示提示訊息，**不**用來決定是否自動 redirect）
 
 ### 必要 API Route
 
@@ -270,9 +273,9 @@ export async function GET(request: NextRequest) {
 
 ### `app/api/auth/logout/route.ts`
 
-> 登出必須走 Microsoft AD `end_session_endpoint` 才能清掉 `login.microsoftonline.com`
-> 上的 SSO cookie，否則使用者重新整理會被 AD 靜默拉回登入狀態。SSO `POST /api/auth/logout`
-> 會回傳 `logout_url`（已含 `id_token_hint` + 跳板 URL），Client 端**只需把瀏覽器導去那裡**。
+> 兩層 Session 模型：通知中央刪 Redis session + back-channel 全部 App，**不動 AD**。
+> SSO `POST /api/auth/logout` 回傳 `{ message, redirect }`，`redirect` 是 SSO 驗證過 origin
+> 的最終落地 URL（保留 path/query，可帶 `?logged_out=1`）。Client 端 302 過去即可。
 
 ```typescript
 import { NextResponse } from "next/server";
@@ -296,10 +299,8 @@ export async function GET() {
         body: JSON.stringify({ redirect: FALLBACK_REDIRECT }),
       });
       if (res.ok) {
-        const data = (await res.json().catch(() => ({}))) as {
-          logout_url?: string;
-        };
-        if (data.logout_url) redirectTarget = data.logout_url;
+        const data = (await res.json().catch(() => ({}))) as { redirect?: string };
+        if (data.redirect) redirectTarget = data.redirect;
       }
     } catch {
       // SSO 不可達也繼續清本地 cookie，落地 fallback URL
@@ -355,6 +356,9 @@ export async function POST(request: NextRequest) {
 
 ### 登入頁 `app/page.tsx`
 
+> **契約 #3**：沒 session 時**只顯示按鈕**，不可呼叫 `window.location = ssoUrl`。
+> 自動 redirect 會破壞 logout（中央 session 已被刪、AD silent SSO 仍然有效，自動 redirect 等於秒回 dashboard）。
+
 ```tsx
 "use client";
 import { useEffect, useState } from "react";
@@ -368,24 +372,19 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const error = searchParams.get("error");
-  const loggedOut = searchParams.get("logged_out");
   const [checking, setChecking] = useState(true);
 
   const ssoUrl = `${SSO_URL}/api/auth/sso/authorize?client_id=${encodeURIComponent(SSO_APP_ID)}&redirect_uri=${encodeURIComponent(`${APP_URL}/api/auth/callback`)}`;
 
   useEffect(() => {
+    // 已登入直接進 dashboard；其餘一律顯示按鈕（契約 #3）
     fetch("/api/auth/me")
-      .then(async (res) => {
-        if (res.ok) { router.push("/dashboard"); return; }
-        const data = await res.json().catch(() => ({}));
-        if (data.error === "session_expired" || error || loggedOut) {
-          setChecking(false); // 顯示登入按鈕
-        } else {
-          window.location.href = ssoUrl; // no_token → 靜默導向 SSO
-        }
+      .then((res) => {
+        if (res.ok) router.push("/dashboard");
+        else setChecking(false);
       })
       .catch(() => setChecking(false));
-  }, [router, error, loggedOut, ssoUrl]);
+  }, [router]);
 
   if (checking) return <p>驗證中...</p>;
 
@@ -406,22 +405,21 @@ export default function LoginPage() {
 
 ---
 
-## 登出死循環與 `?logged_out=1`
+## 為什麼登入頁不自動 redirect？
 
-「跨 App 免登入」的副作用：剛清完本地 cookie 後進入 `/`，`useEffect` 若直接導回 SSO，中央 session 還在就會瞬間拿到新 token 回來（等於沒登出）。
+兩層 Session 模型下，logout 的有效性靠這條契約：
 
-`?logged_out=1` 是**一次性暫停旗標**，打斷這條死循環：
+| 場景 | 自動 redirect 會發生什麼 | 顯示按鈕會發生什麼 |
+|------|--------------------------|---------------------|
+| 登出後 refresh App-A | `/me` → `no_token` → 自動 `/authorize` → 中央無 session → AD silent SSO → 秒回 dashboard ❌ | 看到登入頁，使用者必須點「登入」才會走 OAuth ✅ |
+| 跨 App 第一次訪問 App-B（同 SSO 已登入） | `/me` → `no_token` → 自動 `/authorize` → 中央有 session → 直接拿 code → dashboard（少 1 click） | 看到 App-B 登入頁，點「登入」→ 中央有 session → 直接拿 code → dashboard（多 1 click） |
+| Session 過期 | 同登出後的場景，秒回 dashboard ❌ | 看到登入頁 ✅ |
 
-| 進入 `/` 的情境 | URL query | 行為 |
-|----------------|-----------|------|
-| 第一次訪問 / 跨 App 跳來 |（無）| 靜默導向 SSO |
-| Session 過期 | `?error=session_expired` | 顯示按鈕，**不**自動導 |
-| 剛點完登出 | `?logged_out=1` | 顯示按鈕，**不**自動導 |
-| 其他錯誤 | `?error=...` | 顯示按鈕，**不**自動導 |
+**Tradeoff**：跨 App 第一次訪問多 1 次點擊，換來 logout 真的有效。對企業內 SSO 是合理代價。
 
-登入頁判斷順序必須是 **`if (res.ok) → /dashboard` 在前、`if (loggedOut) → 顯示按鈕` 在後**。這會導致一個「預期非 bug」：Tab1 登出後顯示 `?logged_out=1`，Tab2 另一 App 重新登入（同 origin token cookie 共享），Tab1 F5 → 直接進 dashboard。這是**對的**：使用者實際上已經有有效 session，卡在登入頁反而是真正的 bug。
+`?logged_out=1` / `?error=...` query 仍保留，但純粹用於**顯示提示訊息**（"您已登出" / "Session 已過期"），不再是「自動 redirect 開關」。判斷順序：`if (res.ok) → /dashboard` 在前，`else → 顯示按鈕`，沒有第二個分支。
 
-> MockA（[../DF-SSO-MockA/app/page.tsx](../DF-SSO-MockA/app/page.tsx)）與 MockB 是 reference 實作。
+> 實作對齊：[../DF-SSO-MockA/app/page.tsx](../DF-SSO-MockA/app/page.tsx) 與 [../DF-SSO-MockB/app/page.tsx](../DF-SSO-MockB/app/page.tsx) 是 reference。
 
 ---
 
@@ -433,13 +431,13 @@ export default function LoginPage() {
 |------|--------|
 | `GET /api/auth/callback?code=xxx` | POST 中央 `/api/auth/sso/exchange` → 存 token cookie → redirect dashboard |
 | `GET /api/auth/me` | 讀 cookie → Bearer 呼叫中央 `/api/auth/me` → 401 時清 cookie 回 `session_expired` |
-| `GET /api/auth/logout` | 讀 cookie → Bearer POST 中央 `/api/auth/logout` → 清 cookie → redirect `/?logged_out=1` |
+| `GET /api/auth/logout` | 讀 cookie → Bearer POST 中央 `/api/auth/logout` → 清 cookie → redirect 到回應的 `redirect` 欄位（fallback `/?logged_out=1`） |
 | `POST /api/auth/back-channel-logout` | 驗 HMAC + timestamp → 回 `{ success: true }` |
 
 **必守**：
 
 - 所有 server-to-server fetch 加 `cache: "no-store"` + timeout
-- `/me` 必須區分 `no_token`（自動導向 SSO）與 `session_expired`（顯示按鈕）
+- 登入頁（`/`）只在 `/me` 200 時 redirect 到 dashboard，401 一律顯示按鈕（契約 #3）
 - `client_secret` **絕不可**出現在前端
 - back-channel：`HMAC-SHA256(app_secret, "${user_id}:${timestamp}")`、constant-time 比對（Node `crypto.timingSafeEqual` / Python `hmac.compare_digest` / Java `MessageDigest.isEqual`）、`abs(now - timestamp) ≤ 30_000 ms`
 - **把 `/me` 驗證包成框架原生 middleware**（概念等同 `withAuth`），所有 protected endpoint 必須經過：
@@ -493,6 +491,6 @@ export default function LoginPage() {
 | `Too many exchange attempts` | exchange rate limit（預設 20 / 1min） |
 | `Invalid signature`（back-channel） | `SSO_APP_SECRET` 不一致或 timestamp 超過 30 秒 |
 | 登出後其他 App 仍可用 | 正常，其他 App 下次 `/me` 才會 401（契約 #1） |
-| 按了登出馬上又自動登入回去 | Client 沒有 POST 中央 `/logout`，中央 Redis session 還活著（契約 #2） |
+| 按了登出馬上又自動登入回去 | (a) Client 沒有 POST 中央 `/logout`（契約 #2）；或 (b) 登入頁在 `/me` 401 時自動 redirect 到 `/authorize`（契約 #3） |
 
 > Rate limit 為動態值，實際以當下 SSO 環境 Dashboard「設定」分頁為準。

@@ -33,14 +33,6 @@ const config = {
         return 'microsoft';
       }
     })(),
-    // Backend origin（從 AZURE_REDIRECT_URI 解析）：用於 Microsoft RP-Initiated Logout 的 post_logout_redirect_uri
-    backendOrigin: (() => {
-      try {
-        return new URL(process.env.AZURE_REDIRECT_URI).origin;
-      } catch {
-        return '';
-      }
-    })(),
   },
 
   // Cookie domain（設定後 token cookie 會在所有子網域共用，例如 .apps.zerozero.tw）

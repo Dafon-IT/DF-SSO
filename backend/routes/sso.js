@@ -4,7 +4,6 @@ import jwt from 'jsonwebtoken';
 import config from '../config/index.js';
 import redis from '../config/redis.js';
 import allowedListService from '../services/allowedList.js';
-import { buildMicrosoftLogoutUrl } from '../services/microsoftLogout.js';
 
 const router = express.Router();
 
@@ -163,36 +162,24 @@ router.post('/exchange', async (req, res) => {
 
 /**
  * GET /api/auth/sso/logout?redirect=<url>
- * 全域登出（瀏覽器入口）：
+ * 全域登出（瀏覽器入口，兩層 Session 模型）：
  *   1. 清除中央 session + token cookie
  *   2. Back-channel 通知所有 client app
- *   3. 導向 Microsoft AD end_session_endpoint，由 AD 清掉自己的 SSO cookie
- *      → AD 完成後會帶 redirect 到 /api/auth/sso/post-logout，再由跳板導回最終 redirect
+ *   3. 直接 302 到 redirect（AD session 不動，由 Client App 端契約阻擋 silent re-login）
  *
- * redirect 參數的 origin 必須在 sso_allowed_list（防開放重導向攻擊）
+ * redirect 參數的 origin 必須在 sso_allowed_list；origin 通過後僅保留 origin
+ * （剝除攻擊者可能注入的 path/query/fragment）。
  */
 router.get('/logout', async (req, res) => {
   const { redirect } = req.query;
   const token = req.cookies.token;
 
   let userId = null;
-  let microsoftIdToken = null;
 
   if (token) {
     try {
       const decoded = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
       userId = decoded.userId;
-
-      // 在刪除前先讀出 id_token（給 AD logout 用作 id_token_hint）
-      const sessionStr = await redis.get(`${SESSION_PREFIX}${decoded.userId}`);
-      if (sessionStr) {
-        try {
-          microsoftIdToken = JSON.parse(sessionStr).microsoftIdToken || null;
-        } catch {
-          // ignore
-        }
-      }
-
       await redis.del(`${SESSION_PREFIX}${decoded.userId}`);
     } catch {
       // token 無效，繼續清除 cookie
@@ -248,45 +235,6 @@ router.get('/logout', async (req, res) => {
       }
     } catch {
       console.warn('Invalid redirect URL in logout request');
-    }
-  }
-
-  // 導向 Microsoft AD end_session_endpoint（清 AD SSO cookie），AD 會接著導回 /post-logout 跳板
-  res.redirect(buildMicrosoftLogoutUrl(microsoftIdToken, safeRedirect));
-});
-
-/**
- * GET /api/auth/sso/post-logout?redirect=<url>
- * AD 登出跳板：Microsoft 登出 AAD session 後會把瀏覽器導回這裡。
- *
- * 為什麼存在：
- *   Microsoft 規定 post_logout_redirect_uri 必須事先在 Azure App Registration
- *   「Front-channel logout URL」註冊。我們只把 SSO 自己的這個 endpoint 註冊到
- *   Azure，實際各 Client App 的最終目的地由本端讀 sso_allowed_list 動態驗證後再導過去。
- *   這樣維持「sso_allowed_list 是單一事實來源」的設計慣例，新增 Web App 不用動 Azure。
- *
- * 安全：redirect origin 必須在 sso_allowed_list（與 /logout 同樣的驗證邏輯）
- */
-router.get('/post-logout', async (req, res) => {
-  const { redirect } = req.query;
-
-  let safeRedirect = config.frontendUrl;
-  if (redirect && typeof redirect === 'string') {
-    try {
-      const parsed = new URL(redirect);
-      if (!['http:', 'https:'].includes(parsed.protocol)) {
-        console.warn(`Blocked post-logout redirect with disallowed protocol: ${parsed.protocol}`);
-      } else {
-        const origins = await allowedListService.getAllOrigins();
-        if (origins.includes(parsed.origin) || parsed.origin === config.frontendUrl) {
-          // 保留完整 redirect（包含 path/query），方便 Client App 帶 ?logged_out=1 之類旗標
-          safeRedirect = redirect;
-        } else {
-          console.warn(`Blocked post-logout redirect to unauthorized origin: ${parsed.origin}`);
-        }
-      }
-    } catch {
-      console.warn('Invalid redirect URL in post-logout request');
     }
   }
 
