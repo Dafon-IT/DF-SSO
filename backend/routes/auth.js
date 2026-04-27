@@ -79,6 +79,7 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
   delete req.session.oauthState;
 
   let claims = null;
+  let microsoftIdToken = null;
 
   try {
     // Step 3: 用 code 換取 tokens
@@ -89,6 +90,7 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
     });
 
     claims = tokenResponse.idTokenClaims;
+    microsoftIdToken = tokenResponse.idToken || null;
 
     console.log('Microsoft Login Success:', {
       oid: claims.oid,
@@ -205,7 +207,7 @@ router.get(`/${config.azure.authPathSegment}/redirect`, async (req, res) => {
     erpData: erpData,
     // Microsoft id_token：登出時帶 id_token_hint 給 AD end_session_endpoint，
     // AD 才知道是哪個帳號要登出（否則會跳帳號選單）
-    microsoftIdToken: tokenResponse.idToken || null,
+    microsoftIdToken: microsoftIdToken,
     loginLogUid: logRecord?.uid || null,
     loginAt: new Date().toISOString(),
   };
