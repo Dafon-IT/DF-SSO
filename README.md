@@ -36,7 +36,7 @@ Client App              SSO 中央                       Microsoft Azure AD
 | **登入** | Client `/me` 回 401 → SSO authorize → Microsoft → 建 Redis session → 發 code → Client `/sso/exchange` 換 JWT |
 | **跨 App 免登入** | 訪問新 App → authorize → 中央 session 已存在 → 靜默發 code → 直接換 token（不跳 Microsoft） |
 | **登出** | Client POST 中央 `/logout` → 刪 Redis session → back-channel 廣播 → Client 清本地 cookie |
-| **Session 過期** | `/me` 回 401 → 清本地 cookie → 回首頁若中央 cookie 仍存在則靜默重登 |
+| **Session 過期** | `/me` 回 401 → 清本地 cookie → 顯示登入頁 → 使用者點登入後 AD silent SSO 重建 session |
 
 ## API 端點
 
