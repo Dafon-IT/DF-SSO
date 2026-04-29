@@ -22,7 +22,7 @@
 
 1. **`/me` 即時回源中央** — 本地驗證端點必須以 `Authorization: Bearer <token>` 把每次請求轉發到中央 `/api/auth/me`。**JWT 簽名有效 ≠ session 仍存在**，中央 Redis 是唯一事實來源。**不可在本地快取 user**。
 2. **登出 POST 中央 + 跟隨 redirect** — 收到本地 logout 請求時，必須先以 `Authorization: Bearer <token>` POST 中央 `/api/auth/logout`，然後 302 到回應中的 `redirect`。只清本地 cookie 不通知中央 → 中央 session 還活著，下次 silent SSO 把使用者拉回。
-3. **登入頁（`/`）401 時顯示按鈕，不可自動 redirect 到 `/authorize`** — 自動 redirect 會破壞「登出真有效」（中央被清→AD silent→秒回 dashboard）。**僅適用登入頁**，dashboard 在工作中遇到 401 走 silent re-auth（見後段）。
+3. **登入頁 401 處理（兩種模式擇一，不可混用）** — 詳見下節「登入頁兩種模式」。**僅適用登入頁**；dashboard 在工作中遇到 401 兩個模式都走 silent re-auth（見後段）。
 4. **Back-channel logout 必驗 HMAC + timestamp** — 演算法 `HMAC-SHA256`，訊息字串 `"${user_id}:${timestamp}"`，密鑰 `app_secret`；比對使用 constant-time 比對函式（**不可用 `==` / `equals`**），並驗 `abs(now_ms - timestamp) ≤ 30000`。**保留無驗證的端點 比 不註冊端點還糟**——前者騙系統有保護。
 
 ---
@@ -35,6 +35,66 @@
 | **B. 本地帳密 + SSO** | App 有自己的帳號表，部分使用者本地登入、部分走 SSO |
 
 兩模式的硬性契約相同，差別在 **token 驗證策略** 與 **silent re-auth 行為**。
+
+---
+
+## 登入頁兩種模式（契約 #3 細則）
+
+每個 App **必須**在「嚴格模式」與「企業 Portal 模式」之間明確擇一，兩個模式不可混用。決策依 App 性質：
+
+| 模式 | 登入頁 401 行為 | 適用情境 | 取得 | 放棄 |
+|---|---|---|---|---|
+| **嚴格模式（預設）** | 顯示「透過 SSO 登入」按鈕，**禁止**自動 redirect | 對外 / 含敏感操作（金流、客戶資料、內部審批）| 登出視覺有效——使用者明確看到「未登入」狀態 | 每個 App 一輩子至少要點一次按鈕 |
+| **企業 Portal 模式** | 沒 cookie / `/me` 401 → **自動 `window.location.href = <auth-login-url>`** 進入 SSO 鏈 | 全公司內部 admin 工具（部署平台、監控、報表）| Microsoft 365 級「打開即進」UX——跨 App 零互動 | 登出視覺傳遞會被 silent re-auth 抵消（見下節「Portal 模式登出例外」） |
+
+**兩種模式的共同底線：**
+- 都不可在 `?logged_out=1` 等明確登出旗標下自動 redirect（**Portal 模式必須保留這個例外**，否則使用者完全看不到登出效果）
+- Dashboard 在工作中 401 兩個模式都走 silent re-auth
+- 所有其他硬性契約（#1 / #2 / #4）兩個模式都要遵守
+
+### Portal 模式登出例外
+
+Portal 模式的核心副作用：使用者在別 App 登出後，打開本 App 會被 silent SSO 拉回 dashboard。要讓「主動登出」至少在當下 App 看得到效果，**Portal 模式的登入頁必須處理 `?logged_out=1` 旗標**：
+
+| 進站來源 | 登入頁行為 |
+|---|---|
+| 直接打開 / refresh / 從別 App 跳過來 | 自動 redirect 進 SSO 鏈（Portal 預設） |
+| **從本 App 自家登出 (`?logged_out=1`)** | **跳過自動 redirect**，顯示「已成功登出」訊息 + 登入按鈕，由使用者主動點擊才再走 SSO 鏈 |
+
+這讓使用者「點登出」這個動作至少在當下 App 留下視覺痕跡，而非整個流程完全 silent。
+
+### 跨 App 共享登入是 SSO 中央做的，不是各 App 做的
+
+**不要誤會 Portal 模式 = cookie 跨域共享**。每個 App 仍然有自己 domain 上的 cookie。Portal 模式之所以能「打開即進」，是因為：
+
+1. 使用者首次登入任一 App 時，**SSO 中央**在自己 domain（例如 `df-it-sso-login.it.zerozero.tw`）寫了一顆 session cookie
+2. 使用者打開 App B 時，App B 登入頁自動 redirect 到 SSO `/authorize`
+3. SSO 中央看到自己 domain 的 cookie 還活著 → silent 簽 auth code → 302 回 App B callback
+4. App B callback 寫**自己 domain** 的 cookie
+
+跨 App 體驗對齊靠的是「**SSO 中央 cookie 持久 + 各 App 自動 redirect 串完整鏈**」——這就是 Microsoft 365 / Google Workspace 的做法。Cookie 仍是 per-domain，Portal 模式不需要額外處理 cookie domain。
+
+### 模式 B（本地帳密 + SSO）下的 Portal 模式
+
+Portal 模式對純 Mode A（如全公司 admin 工具）很乾淨，但**Mode B 不能直接套用**——使用者可能根本不是 SSO 用戶（純本地帳號），盲目 auto-redirect 到 SSO 會把本地登入入口完全隱藏。
+
+Mode B 的 Portal 模式必須**provider-aware**：
+
+| 使用者狀態 | 登入頁行為 |
+|---|---|
+| 從未登入過 / 不知 provider | 顯示兩個選項：「透過 SSO 登入」按鈕 + 本地帳密表單。**不自動 redirect**，讓使用者主動選 |
+| 上次登入是 SSO（前端有 provider hint）| 自動 redirect 到 SSO `/auth/login`（Portal 行為）|
+| 上次登入是 local（前端有 provider hint）| 直接顯示本地帳密表單，**不**自動 redirect 到 SSO |
+
+實作建議：
+
+- 登入成功後，前端在 `localStorage` 或一顆**非 httpOnly** 的提示 cookie（例如 `last_login_provider`）寫入 `sso` 或 `local`。**這個 hint 不是憑證，洩漏無害**——它只決定登入頁怎麼顯示
+- 登入頁讀此 hint 決定行為
+- 登出時清掉 hint，讓使用者下次回到「兩個選項並陳」狀態（避免「我已經改用本地帳號了，但登入頁還一直 auto-redirect 到 SSO」）
+
+這跟 Mode B 的 silent re-auth provider 分流邏輯（見後段「Silent Re-Auth Pattern」）一致：**provider 決定走哪條路**。
+
+**純 Mode A 的 App** 不需要這層分流，登入頁可以直接 auto-redirect，無需 hint。
 
 ---
 
