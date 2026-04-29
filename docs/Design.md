@@ -84,7 +84,11 @@
 ### 登入流程
 
 ```
-使用者訪問 App-A → /api/auth/me → 無 token → 401 "no_token" → 自動導向 SSO
+使用者訪問 App-A → /api/auth/me → 無 token → 401 "no_token"
+        │
+        │ Client App 依「登入頁兩種模式」擇一處理（見後段）：
+        │   • 嚴格模式：顯示登入按鈕，使用者點擊後觸發下方流程
+        │   • 企業 Portal 模式：登入頁 useEffect 直接 window.location → /authorize
         │
         ▼
 [1] 瀏覽器導向 SSO Backend
@@ -135,12 +139,28 @@
 
 ### 跨應用自動登入
 
+「跨 App 一鍵登入」的機制**不靠 cookie 跨域共享**（cookie 仍是 per-domain），而是靠**SSO 中央 session cookie 持久 + 各 Client App 自動串接 OAuth 鏈**：
+
 ```
-已登入 App-A，訪問 App-B → /api/auth/me → 401 "no_token"
-  → 自動導向 SSO /authorize?client_id={app_b_id}
-  → SSO 有中央 session → 直接產生 auth code（不碰 Microsoft！）
-  → App-B exchange { code, client_id, client_secret } → 存 token → Dashboard
+[使用者已在 App-A 登入過 → SSO 中央 domain 上有 session cookie]
+   ↓
+打開 App-B → /api/auth/me 401 "no_token"
+   ↓
+[Client App 行為依模式分流]
+   │
+   ├─ 嚴格模式：顯示登入按鈕 → 等使用者點擊 → 之後流程同 Portal
+   │
+   └─ 企業 Portal 模式：登入頁 useEffect 自動 window.location → /authorize
+       │
+       ↓
+   /authorize?client_id={app_b_id}&redirect_uri=...
+       ↓
+   SSO 中央看 cookie：有中央 session → 直接產生 auth code（不碰 Microsoft！）
+       ↓
+   App-B callback → /sso/exchange → 寫本地 cookie → Dashboard
 ```
+
+**Microsoft 365 風格的「打開即進」UX 必須選企業 Portal 模式**（嚴格模式至少要點一次按鈕）。兩種模式的取捨見「[登入頁兩種模式](#登入頁兩種模式契約-3-細則)」段。
 
 ### 登出流程（兩層 Session 模型）
 
@@ -164,45 +184,105 @@ App-A 點登出 → /api/auth/logout
 | 中央 SSO session | DF-SSO Redis（key = `sso:session:{userId}`） | **刪除** |
 | App session | 各 Client App cookie | back-channel 收到通知後刪除 |
 
-**「登出真的有效」由 Client App 端契約保障**（見下節 [Client App 登入頁契約](#client-app-登入頁契約)）：
-back-channel 已清掉 App 本地 cookie，App **必須顯示自家登入頁**，**不可** 自動 redirect 到 `/authorize`。
-使用者必須在 App 登入頁主動點「登入」才會重新觸發 OAuth flow。
+**「登出視覺有效」由 Client App 登入頁的模式選擇決定**——詳見下節「[登入頁兩種模式](#登入頁兩種模式契約-3-細則)」。嚴格模式下使用者會看到登入頁；Portal 模式為了換取「跨 App 零互動」UX，視覺上會被 silent re-auth 抵消（中央 session 真實狀態仍正確）。
 
-### Client App 登入頁契約
+### 登入頁兩種模式（契約 #3 細則）
 
-每個整合 SSO 的 Client App **必須遵守** 以下契約，否則「登出」會等同無效（lazy App 自動 redirect → AD silent → 立刻又回到 Dashboard）：
+每個 Client App 必須在兩個模式中**明確擇一**，**不可混用**。決策依 App 性質：
 
-| 情境 | App 端正確行為 | 錯誤行為（會破壞 logout） |
-|------|----------------|----------------------------|
-| `/api/auth/me` 回 `401 no_token`（沒 cookie，含登出後） | **顯示 App 自家登入首頁**，等使用者點「登入」按鈕 | 自動 `window.location = SSO_URL/authorize?...` |
-| `/api/auth/me` 回 `401 session_expired`（有本地 token 但中央 session 過期 / 被登出） | 清除本地 cookie 後，導回首頁 → 觸發上面 `no_token` 流程 | 同上自動 redirect |
-| 收到 back-channel logout（`/api/auth/back-channel-logout`） | 驗 HMAC + timestamp 後刪除該 user_id 的本地 session | 不驗簽 / 不驗 timestamp |
+| 模式 | 登入頁 401 行為 | 適用情境 | 取得 | 放棄 |
+|---|---|---|---|---|
+| **嚴格模式（預設）** | 顯示登入按鈕，**禁止**自動 redirect | 對外 / 含敏感操作（金流、客戶資料、內部審批）| 登出視覺明確——使用者看到「未登入」狀態 | 每個 App 一輩子至少點一次按鈕 |
+| **企業 Portal 模式** | 沒 cookie / 401 → **自動 `window.location.href = <auth-login-url>`** 進 SSO 鏈 | 全公司內部 admin 工具（部署平台、監控、報表）| Microsoft 365 級「打開即進」UX | 登出視覺傳遞會被 silent re-auth 抵消 |
 
-> 範本實作見 [INTEGRATION.md](../INTEGRATION.md) 的 `LoginPage` component 與 middleware。
+**兩個模式的共同底線：**
 
-### 兩種 401 情境對照
+| 規則 | 為什麼 |
+|---|---|
+| `?logged_out=1` 旗標下不自動 redirect | 主動登出至少要在當下 App 留下視覺痕跡（綠色「已成功登出」訊息 + 登入按鈕）|
+| Dashboard 工作中 401 都走 silent re-auth | 兩個模式對「session 自然過期」的恢復行為一致 |
+| 硬性契約 #1 / #2 / #4 | 兩個模式都要遵守 |
+
+#### 嚴格模式的「登出真有效」邏輯
+
+中央 session 被刪 → AD silent SSO 還活著 → 如果登入頁自動 redirect 到 `/authorize`，會 silent 秒回 dashboard，登出毫無視覺效果。**嚴格模式用「強制使用者點按鈕」當煞車**——主動性回到使用者手上。
+
+#### 企業 Portal 模式的取捨真相
+
+Portal 模式的「跨 App 一鍵登入」與「登出視覺消失」是**同一個機制的兩面**：
+
+- 中央 session 被刪後，AD session 還活著（DF-SSO 設計刻意不動 AD 那層）
+- Portal 模式自動 redirect → silent SSO 立刻補新 session → 看似沒登出
+- 但**中央 session 真的死了**——舊的所有 token 都失效，使用者拿到的是新 session、新 cookie
+
+接受這個取捨等於接受「**內部使用者體感平順 > 登出視覺立即傳遞**」這個價值排序。對外 App 不可選此模式。
+
+#### 模式 B（本地帳密 + SSO）下的 Portal
+
+純 Mode A 可以無條件 auto-redirect。Mode B（App 同時有 SSO 使用者與本地帳號使用者）**必須 provider-aware**，否則本地帳號使用者會看不到帳密表單：
+
+| 使用者狀態 | 登入頁應該做的事 |
+|---|---|
+| 從未登入過 / 不知 provider | 顯示兩個選項：SSO 按鈕 + 本地帳密表單，**不**自動 redirect |
+| 上次登入是 SSO（前端有 hint）| auto-redirect 到 SSO（Portal 行為）|
+| 上次登入是 local（前端有 hint）| 直接顯示帳密表單，**不**走 SSO |
+
+實作建議：登入成功後寫一顆 **非 httpOnly** 的提示 cookie 或 `localStorage` 鍵 `last_login_provider=sso|local`（這個 hint 不是憑證、洩漏無害——只決定登入頁長什麼樣）；登出時清掉，避免「我已經改用本地帳號了，但登入頁還一直 auto-redirect 到 SSO」卡住。
+
+> 範本實作見 [INTEGRATION.md](../INTEGRATION.md)。MockA / MockB 是嚴格模式參考；Coolify-API-Integration 是企業 Portal 模式參考。
+
+### 兩種 401 情境 × 兩種模式對照
+
+backend 行為兩個情境完全一致（都是「沒中央 session → 走 OAuth 重建」）；**差別在 Client App 端的視覺**：
 
 ```
 情境 A：中央 session 自然過期（24h TTL 到）
-  /api/auth/me → SSO Redis sso:session:{userId} 不存在 → 401 "session_expired"
-    → Client 清除本地 token → 回首頁
-    → /api/auth/me → 401 "no_token"
-    → 顯示登入頁 → 使用者點「登入」
-    → /authorize → AD silent SSO → callback → 建立新 session → Dashboard
-    （AD session 還在，所以 AD 那關不會跳出畫面）
+  /api/auth/me → 401 "session_expired" → Client 清本地 cookie → 回首頁
+
+  嚴格模式：登入頁顯示按鈕 → 使用者點 → /authorize → AD silent → 建立新 session → Dashboard
+  Portal 模式：登入頁 useEffect 自動 redirect → /authorize → AD silent → 建立新 session → Dashboard
+  （兩個模式體感差別：嚴格多一個「點按鈕」動作；Portal 完全無感）
 
 情境 B：使用者按了登出
-  App-A 觸發登出 → 中央刪 sso:session + back-channel 全部 App
-    → App-B 本地 cookie 也被清掉
-    → 使用者下次回到 App-B：
-       /api/auth/me → 401 "no_token"
-       → 顯示登入頁 → 使用者點「登入」
-       → /authorize → AD silent SSO → callback → 建立新 session → Dashboard
-       （和情境 A 一模一樣，差別只在「使用者必須親自點登入」是 logout 的核心保護）
+  App-A 觸發登出 → 中央刪 sso:session + back-channel 通知所有 App
+    → App-B 本地 cookie 被清
+
+  嚴格模式：使用者下次回 App-B → 看到登入頁 → 必須主動點按鈕才能再進去
+            ✓ 登出視覺有效
+
+  Portal 模式：使用者下次回 App-B → useEffect 自動 redirect → AD silent → 進 Dashboard
+            ✗ 登出視覺被抵消（但中央 session 真的死了，舊 token 全失效）
+            例外：當使用者主動從 App-B 自家點登出 → 落地 ?logged_out=1 →
+                 此 query string 下登入頁不 auto-redirect，顯示「已成功登出」+ 按鈕
 ```
 
-> 兩種情境在 backend 行為完全一致（都是「沒中央 session → 走 OAuth 重建」），
-> 差別純粹在 App 端：**登出後 App 必須讓使用者看到登入頁**，不能偷偷 silent re-login。
+> **「登出真有效」的契約落點不同**：
+> - **嚴格模式**：靠 Client App 顯示登入頁（contract #3 嚴格模式）保證使用者看到未登入狀態
+> - **Portal 模式**：放棄跨 App 視覺傳遞，僅靠 `?logged_out=1` 例外保留「當下 App 看到登出訊息」這一條最低限度視覺
+
+### 設計取捨：DF-SSO vs Microsoft 365
+
+「為什麼 Microsoft 365 可以打開 outlook 即進、DF-SSO 不可以（嚴格模式）」這個問題的答案在 **登出時殺 AD 那層的權力**：
+
+|  | Microsoft 365 | DF-SSO |
+|---|---|---|
+| 登入機制 | 各 App 自動 redirect 到 `login.microsoftonline.com`，看 cookie 有則 silent | 同樣的 OAuth flow，但 Client App 是否 auto-redirect 由模式決定 |
+| 登出殺到哪層 | App + AD（Microsoft 自己控制 AD 那層）| App + 中央 session，**不動 AD** |
+| 自動 redirect 後撞牆 | 撞 AD 沒 cookie → 跳 Microsoft 登入畫面 ✓ 登出有效 | 撞 AD 還活著 → silent 秒回 ✗ 登出無效 |
+| 結果 | 自動 redirect ＋ 登出有效（都拿到）| 兩者只能擇一（嚴格模式 vs Portal 模式） |
+
+**DF-SSO 為什麼不殺 AD 那層**：AD 是公司 Microsoft Azure 帳號，殺掉等於強迫使用者下次 Outlook / Teams / SharePoint 全部重輸密碼 + MFA。這對內部生產力衝擊太大，所以 DF-SSO 的「登出」設計成只殺中央 + App 兩層，AD 由 Microsoft 自己管。
+
+**結論**：DF-SSO 不可能完全做到 Microsoft 365 的 UX——它沒有殺 AD 的權力。**規範用「兩種模式擇一」讓 App 自己選**：要登出視覺有效 → 嚴格模式（接受按鈕成本）；要打開即進 → Portal 模式（接受登出視覺消失，僅留 `?logged_out=1` 最低限度視覺）。
+
+### 落地參考
+
+| App | 模式 | 為什麼 |
+|---|---|---|
+| MockA / MockB | 嚴格模式 | 規範範本實作，測試 contract #3 嚴格行為 |
+| Coolify-API-Integration | 企業 Portal 模式 | 內部 admin 部署平台，使用者群小、互信高、需要跨 App 流暢 UX |
+| df-it-agents-platform | （依 App 性質決定）| — |
+| 將來的 CRM / 外部 App | 嚴格模式 | 含客戶資料 / 敏感操作，登出視覺必須有效 |
 
 ---
 
