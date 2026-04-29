@@ -6,7 +6,7 @@
 
 | 環境 | Frontend（管理後台） | Backend（OAuth2 Server） |
 |------|---------------------|--------------------------|
-| **Prod** | https://df-sso-management.apps.zerozero.tw | https://df-sso-login.apps.zerozero.tw |
+| **Prod** | https://df-it-sso-management.it.zerozero.tw | https://df-it-sso-login.it.zerozero.tw |
 | **Test** | https://df-sso-management-test.apps.zerozero.tw | https://df-sso-login-test.apps.zerozero.tw |
 | **Dev**  | http://localhost:3000 | http://localhost:3001 |
 

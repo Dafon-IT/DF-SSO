@@ -1,22 +1,33 @@
 # 初始化 SSO 登入器整合（Python FastAPI）
 
-在當前 FastAPI 專案中自動建立 DF-SSO 登入器所需的所有檔案（APIRouter、設定、HTTP client、HMAC 驗章）。
-**執行前會詢問必要資訊,之後全自動完成。**
+在當前 FastAPI 專案中自動建立 DF-SSO 登入器所需的所有 backend 檔案（APIRouter、設定、HTTP client、HMAC 驗章）。
+**執行前會詢問必要資訊，之後全自動完成。**
 
-> 對應 [INTEGRATION.md](../../INTEGRATION.md) 的 4 個端點設計：`/callback`、`/me`、`/logout`、`/back-channel-logout`。
-> 預設 **FastAPI 0.110+ / Python 3.10+**,使用 `httpx.AsyncClient` + `pydantic-settings`。
+> 對應 [INTEGRATION.md](../../INTEGRATION.md) 的契約。**此 command 建立的是模式 A（純 SSO）的 backend**；登入頁與 401 攔截器在前端 SPA（React/Vue/...），完成訊息有對應片段。
+> 預設 **FastAPI 0.110+ / Python 3.10+**，使用 `httpx.AsyncClient` + `pydantic-settings`。
+
+## 硬性契約（必看，漏一條就壞）
+
+1. **`/me` 即時回源中央**：`require_auth` 內每次都打中央 `/api/auth/me`，**禁止本地快取 user**
+2. **登出 POST 中央 + 跟隨 redirect**：`/api/auth/logout` 必須先通知中央再清本地 cookie
+3. **登入頁 401 顯示按鈕，不自動 redirect**：前端 SPA 的登入頁在 `/me` 401 時**只**顯示按鈕；自動 redirect 會破壞「登出真有效」
+4. **Back-channel logout 必驗 HMAC + timestamp**：`hmac.compare_digest` + 30s drift；不註冊端點 比 註冊但不驗 還安全
+
+完整契約見 [INTEGRATION.md](../../INTEGRATION.md)「硬性契約」與「Silent Re-Auth Pattern」。
 
 ## 詢問使用者（依序）
 
 1. **SSO Backend URL** — SSO 中央伺服器的網址
-   - Prod：`https://df-sso-login.apps.zerozero.tw`
+   - Prod：`https://df-it-sso-login.it.zerozero.tw`
    - Test：`https://df-sso-login-test.apps.zerozero.tw`
    - Dev：`http://localhost:3001`
-2. **App URL** — 你的專案網址（例如 `https://warehouse.apps.zerozero.tw`,本機 `http://localhost:8000`）
-3. **App ID** — SSO Dashboard 產生的 `app_id`（UUID）
-4. **App Secret** — SSO Dashboard 產生的 `app_secret`（64 字元,保密）
-5. **App 目錄** — FastAPI 專案的 app 套件目錄（例如 `app`、`src`、`backend`）,預設 `app`
-6. **App Port** — 你的專案 Port（例如 `8000`）
+2. **Backend URL** — 你的後端對外網址（callback 落點 + cookie host，例如 `https://api.warehouse.apps.zerozero.tw`，本機 `http://localhost:8000`）
+3. **Frontend URL** — 你的前端對外網址（登入頁 / dashboard / logout fallback redirect 落點，例如 `https://warehouse.apps.zerozero.tw`，本機 `http://localhost:3000`）
+   - 若前後端**同 origin**（例如 server-render 或 monolith），填同一個 URL 即可
+4. **App ID** — SSO Dashboard 產生的 `app_id`（UUID）
+5. **App Secret** — SSO Dashboard 產生的 `app_secret`（64 字元，保密）
+6. **App 目錄** — FastAPI 專案的 app 套件目錄（例如 `app`、`src`、`backend`），預設 `app`
+7. **App Port** — 你的後端 Port（例如 `8000`）
 
 ## 前置檢查
 
@@ -28,17 +39,15 @@
 - [ ] `pydantic-settings>=2.0`
 - [ ] `python-dotenv`（若要自動讀 `.env`）
 
-若缺,請先補上：
+若缺，請先補上：
 
 ```bash
 pip install "fastapi>=0.110" "httpx>=0.27" "pydantic-settings>=2.0" python-dotenv
 ```
 
-或在 `requirements.txt` 加上對應行。
-
 ## 執行步驟
 
-假設使用者填入的 app 目錄為 `{APP_DIR}`(預設 `app`)。下列所有路徑都以此為基準。
+假設使用者填入的 app 目錄為 `{APP_DIR}`（預設 `app`）。下列所有路徑都以此為基準。
 
 ### 1. 建立 `{APP_DIR}/sso/__init__.py`
 
@@ -52,12 +61,14 @@ __all__ = ["sso_router", "sso_settings", "require_auth", "SsoUser"]
 
 ### 2. 建立 `{APP_DIR}/sso/config.py`
 
+`backend_url` 是 callback 落點 + cookie host，`frontend_url` 是登入頁 / dashboard / logout fallback。前後端同 origin 時兩者相等。
+
 ```python
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class SsoSettings(BaseSettings):
-    """DF-SSO 登入器設定,全部從環境變數讀取。"""
+    """DF-SSO 登入器設定，全部從環境變數讀取。"""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -68,13 +79,14 @@ class SsoSettings(BaseSettings):
     sso_url: str = "http://localhost:3001"
     sso_app_id: str = ""
     sso_app_secret: str = ""
-    app_url: str = "http://localhost:{使用者填的 Port}"
+    backend_url: str = "http://localhost:{使用者填的 Port}"
+    frontend_url: str = "http://localhost:{使用者填的 Port}"
     sso_timeout_seconds: float = 8.0
 
     @property
     def is_secure(self) -> bool:
-        """App 是否走 HTTPS（決定 cookie secure 旗標）。"""
-        return self.app_url.startswith("https://")
+        """Backend 是否走 HTTPS（決定 cookie secure 旗標）。"""
+        return self.backend_url.startswith("https://")
 
 
 sso_settings = SsoSettings()
@@ -106,7 +118,7 @@ async def _request(method: str, path: str, **kwargs: Any) -> httpx.Response:
 
 
 async def exchange(code: str) -> dict[str, Any] | None:
-    """用 auth code 換 SSO token(帶 client_secret,server-to-server)。"""
+    """用 auth code 換 SSO token（帶 client_secret，server-to-server）。"""
     res = await _request(
         "POST",
         "/api/auth/sso/exchange",
@@ -122,7 +134,7 @@ async def exchange(code: str) -> dict[str, Any] | None:
 
 
 async def me(token: str) -> tuple[int, dict[str, Any] | None]:
-    """以 Bearer token 呼叫 SSO /me,回傳 (status_code, payload)。"""
+    """以 Bearer token 呼叫 SSO /me，回傳 (status_code, payload)。契約 #1：每次都回源。"""
     res = await _request(
         "GET",
         "/api/auth/me",
@@ -134,12 +146,11 @@ async def me(token: str) -> tuple[int, dict[str, Any] | None]:
 
 
 async def logout(token: str, redirect_after: str) -> str | None:
-    """通知 SSO 登出（兩層 Session 模型）：中央刪 Redis session + back-channel 通知所有 App。
-    AD session 完全不動。SSO 回傳已驗證 origin 的 redirect URL,Caller 把瀏覽器 302 過去即可。
-    「登出真的有效」靠 Client App 端登入頁不自動 redirect 到 /authorize 的契約。
+    """通知 SSO 登出（兩層 Session 模型，契約 #2）：中央刪 Redis session + back-channel 通知所有 App。
+    AD session 完全不動。SSO 回傳已驗證 origin 的 redirect URL，Caller 把瀏覽器 302 過去即可。
 
-    redirect_after: 登出後最終要落地的 URL(origin 必須在 sso_allowed_list)
-    回傳: SSO 驗證後的 redirect;SSO 不可達或 200 但缺欄位則回 None
+    redirect_after: 登出後最終要落地的 URL（origin 必須在 sso_allowed_list）
+    回傳: SSO 驗證後的 redirect；SSO 不可達或 200 但缺欄位則回 None
     """
     try:
         res = await _request(
@@ -168,7 +179,7 @@ import hmac
 import time
 
 
-MAX_TIMESTAMP_DRIFT_MS = 30_000  # 30 秒
+MAX_TIMESTAMP_DRIFT_MS = 30_000  # 30 秒（雙向 abs）
 
 
 def verify_back_channel_signature(
@@ -177,11 +188,11 @@ def verify_back_channel_signature(
     signature: str,
     app_secret: str,
 ) -> tuple[bool, str | None]:
-    """驗 back-channel logout 的 HMAC 簽章。
+    """驗 back-channel logout 的 HMAC 簽章（契約 #4）。
 
     回傳 (is_valid, error_reason):
     - error_reason: "timestamp_expired" | "invalid_signature" | None
-    - 使用 hmac.compare_digest 做 constant-time compare,
+    - 使用 hmac.compare_digest 做 constant-time compare，
       對齊 SSO backend 的 crypto.timingSafeEqual。
     """
     now_ms = int(time.time() * 1000)
@@ -202,7 +213,7 @@ def verify_back_channel_signature(
 
 ### 5. 建立 `{APP_DIR}/sso/deps.py` — Auth Middleware（FastAPI Depends）
 
-**整個整合的核心**。所有 protected endpoint（包含 `/me` 本身）都必須透過這個 `require_auth` dependency，才能保證「中央 session 被撤銷後下一次呼叫立即失效」。
+**整個整合的核心**。所有 protected endpoint（包含 `/me` 本身）都必須透過這個 `require_auth` dependency，才能保證契約 #1（中央 session 被撤銷後下一次呼叫立即失效）。
 
 ```python
 from typing import Any
@@ -234,9 +245,9 @@ async def require_auth(
 ) -> SsoUser:
     """Protected endpoint 入口都 Depends 這個。成功 → SsoUser；失敗 → HTTPException。
 
-    no_token      → 401 + no_token（前端應自動導向 SSO）
-    session_expired → 401 + session_expired + 清本地 cookie（前端顯示按鈕）
-    sso_unreachable → 502（SSO 暫時不可達）
+    no_token        → 401 + no_token（前端應跳登入頁顯示按鈕）
+    session_expired → 401 + session_expired + 清本地 cookie（前端走 silent re-auth）
+    sso_unreachable → 502（SSO 暫時不可達；不刪 cookie，避免抖動踢人）
     """
     if not token:
         raise HTTPException(
@@ -261,7 +272,7 @@ async def require_auth(
     if code != 200 or payload is None:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"error": "sso_error"},
+            detail={"error": "sso_unreachable"},
         )
 
     user_data: dict[str, Any] = payload.get("user") or {}
@@ -308,51 +319,50 @@ def _clear_token_cookie(resp: Response) -> None:
 # ---------- 1. OAuth callback ----------
 @router.get("/callback")
 async def callback(code: str | None = None) -> Response:
-    """SSO 授權完成後的 callback:用 code 換 token,寫 cookie,導回 /dashboard。"""
+    """SSO 授權完成後的 callback：用 code 換 token，寫 cookie，導回 frontend dashboard。"""
     if not code:
-        return RedirectResponse(url=f"{sso_settings.app_url}/?error=no_code", status_code=302)
+        return RedirectResponse(url=f"{sso_settings.frontend_url}/?error=no_code", status_code=302)
 
     try:
         data = await client.exchange(code)
     except Exception as e:
         log.warning("[SSO] exchange failed: %s", e)
-        return RedirectResponse(url=f"{sso_settings.app_url}/?error=exchange_error", status_code=302)
+        return RedirectResponse(url=f"{sso_settings.frontend_url}/?error=exchange_error", status_code=302)
 
     if not data or not data.get("token"):
-        return RedirectResponse(url=f"{sso_settings.app_url}/?error=exchange_failed", status_code=302)
+        return RedirectResponse(url=f"{sso_settings.frontend_url}/?error=exchange_failed", status_code=302)
 
-    resp = RedirectResponse(url=f"{sso_settings.app_url}/dashboard", status_code=302)
+    resp = RedirectResponse(url=f"{sso_settings.frontend_url}/dashboard", status_code=302)
     _set_token_cookie(resp, data["token"])
     return resp
 
 
-# ---------- 2. /me（直接 Depends require_auth，一行 handler） ----------
+# ---------- 2. /me（Depends require_auth，一行 handler） ----------
 @router.get("/me")
 async def me(user: SsoUser = Depends(require_auth)) -> dict:
-    """`/me` 本身就是 middleware 的第一個使用者,handler 只負責回 user。"""
+    """`/me` 本身就是 middleware 的第一個使用者，handler 只負責回 user。"""
     return {"user": user.model_dump()}
 
 
-# ---------- 3. /logout ----------
+# ---------- 3. /logout（契約 #2） ----------
 @router.get("/logout")
 async def logout(token: str | None = Cookie(default=None)) -> Response:
-    """通知 SSO 登出（兩層 Session 模型）：中央刪 Redis session + back-channel 通知所有 App,
-    清自家 cookie,把瀏覽器導向 SSO 回傳的 redirect。AD session 不動。
-    「登出真的有效」靠登入頁不自動 redirect 到 /authorize 的契約。
-    取不到 redirect 時 fallback 回首頁帶 ?logged_out=1。
+    """通知 SSO 登出 + 清本地 cookie + 跳 SSO 回傳的 redirect。AD session 不動。
+    取不到 redirect 時 fallback 回 frontend 首頁帶 ?logged_out=1。
     """
-    fallback = f"{sso_settings.app_url}/?logged_out=1"
+    fallback = f"{sso_settings.frontend_url}/?logged_out=1"
     target = fallback
     if token:
         url = await client.logout(token, fallback)
         if url:
             target = url
+    # 不論成功與否：同一 response 刪 cookie
     resp = RedirectResponse(url=target, status_code=302)
     _clear_token_cookie(resp)
     return resp
 
 
-# ---------- 4. Back-channel logout ----------
+# ---------- 4. Back-channel logout（契約 #4） ----------
 class BackChannelPayload(BaseModel):
     user_id: str
     timestamp: int
@@ -361,7 +371,9 @@ class BackChannelPayload(BaseModel):
 
 @router.post("/back-channel-logout")
 async def back_channel_logout(payload: BackChannelPayload, request: Request) -> Response:
-    """SSO 廣播登出:驗 HMAC + timestamp drift 後清該 user 的本地 session。"""
+    """SSO 廣播登出：驗 HMAC + timestamp drift 後清該 user 的本地 session。
+    模式 A 純 SSO 通常不需動作；若無任何 server-side state 可整支不註冊。
+    """
     ok, reason = verify_back_channel_signature(
         user_id=payload.user_id,
         timestamp=payload.timestamp,
@@ -369,47 +381,57 @@ async def back_channel_logout(payload: BackChannelPayload, request: Request) -> 
         app_secret=sso_settings.sso_app_secret,
     )
     if not ok:
-        status = 401 if reason in ("timestamp_expired", "invalid_signature") else 400
-        return JSONResponse(status_code=status, content={"error": reason})
+        status_code = 401 if reason in ("timestamp_expired", "invalid_signature") else 400
+        return JSONResponse(status_code=status_code, content={"error": reason})
 
     log.info("[SSO] Back-channel logout user_id=%s", payload.user_id)
-    # TODO: 清掉該 user 在本 App 的 server-side session(若有,例如 Redis / DB session store)
+    # TODO: 若有 in-process 快取 / WebSocket / Redis session，在這裡 invalidate user_id
     return JSONResponse(status_code=200, content={"success": True})
 ```
 
-### 7. 在 `main.py` 掛上 router
-
-找到 FastAPI 專案的入口(通常是 `{APP_DIR}/main.py` 或 `main.py`),加上：
+### 7. 在 `main.py` 掛上 router 與 CORS（前後端分離必設）
 
 ```python
 from fastapi import FastAPI
-from {APP_DIR}.sso import sso_router
+from fastapi.middleware.cors import CORSMiddleware
+from {APP_DIR}.sso import sso_router, sso_settings
 
 app = FastAPI()
+
+# 前後端分離時必須允許前端 origin + credentials
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[sso_settings.frontend_url],
+    allow_credentials=True,  # 允許帶 cookie
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ... 原本的其他 routes ...
 app.include_router(sso_router)
 ```
 
-> 若是 `src/main.py` 結構,import 路徑要調成 `from src.sso import sso_router`。
-> 若尚未建立 `main.py`,請同步建立一個最小骨架(不覆蓋既有檔案)。
+> 若 `frontend_url == backend_url`（同 origin），CORS middleware 仍可保留，不會有副作用。
+> 若是 `src/main.py` 結構，import 路徑要調成 `from src.sso import sso_router, sso_settings`。
 
 ### 8. 建立或更新 `.env`
 
-在專案根目錄 `.env` **追加**下列環境變數(不覆蓋原有內容)：
+在專案根目錄 `.env` **追加**下列環境變數（不覆蓋原有內容）：
 
 ```
 # DF-SSO 登入器
 SSO_URL={使用者填的 SSO URL}
 SSO_APP_ID={使用者填的 App ID}
 SSO_APP_SECRET={使用者填的 App Secret}
-APP_URL={使用者填的 App URL}
+BACKEND_URL={使用者填的 Backend URL}
+FRONTEND_URL={使用者填的 Frontend URL}
 ```
 
-> ⚠️ `SSO_APP_SECRET` **絕不可** commit 進 git,也不可透過任何前端 bundler 暴露出去。
-> ⚠️ `.env` 的變數名必須是大寫,pydantic-settings 會自動映射到 `SsoSettings` 的小寫欄位。
+> ⚠️ `SSO_APP_SECRET` **絕不可** commit 進 git，也不可透過任何前端 bundler 暴露出去。
+> ⚠️ `.env` 的變數名必須是大寫，pydantic-settings 會自動映射到 `SsoSettings` 的小寫欄位。
+> ⚠️ SSO Dashboard 的 `redirect_uris` 註冊的是 callback 的 origin = **BACKEND_URL**，不是 frontend。
 
-同步更新 `.gitignore`(若尚未含):
+同步更新 `.gitignore`（若尚未含）：
 
 ```
 .env
@@ -419,27 +441,25 @@ APP_URL={使用者填的 App URL}
 
 ### 9. 顯示完成訊息
 
-告知使用者：
-
 ```
-✅ SSO 登入器整合完成（Python FastAPI）!
+✅ SSO 登入器整合完成（FastAPI / 模式 A 純 SSO）！
 
 已建立的檔案：
   {APP_DIR}/sso/__init__.py
-  {APP_DIR}/sso/config.py
-  {APP_DIR}/sso/client.py
-  {APP_DIR}/sso/security.py
-  {APP_DIR}/sso/deps.py    — require_auth FastAPI Depends（auth middleware）
-  {APP_DIR}/sso/router.py  — 4 個端點，/me 一行 Depends(require_auth)
-  main.py — 已掛上 sso_router
-  .env — 已追加 SSO 環境變數
+  {APP_DIR}/sso/config.py        — backend_url + frontend_url 兩個 origin
+  {APP_DIR}/sso/client.py        — server-to-server 呼叫 SSO 中央
+  {APP_DIR}/sso/security.py      — HMAC + timestamp 驗章（契約 #4）
+  {APP_DIR}/sso/deps.py          — require_auth Depends（契約 #1）
+  {APP_DIR}/sso/router.py        — 4 個 backend 端點
+  main.py                        — 已掛上 sso_router + CORS allow_credentials
+  .env                           — 已追加 SSO 環境變數
 
 📋 接下來你需要：
 
 1. 確認 SSO Dashboard 的白名單：
-   - 網域:{使用者填的 App URL}
-   - Redirect URIs 要包含:{使用者填的 App URL}
-   取得 app_id / app_secret 後填進 .env
+   - 網域：{使用者填的 Backend URL}（callback 落點）
+   - Redirect URIs 要包含：{使用者填的 Backend URL}
+   - 若 BACKEND_URL ≠ FRONTEND_URL，FRONTEND_URL 也要加進 redirect_uris（logout fallback 落點驗證）
 
 2. 所有需要登入的 protected endpoint 一律 Depends(require_auth)：
 
@@ -450,46 +470,90 @@ APP_URL={使用者填的 App URL}
 
    @router.get("/api/assets")
    async def list_assets(user: SsoUser = Depends(require_auth)):
-       # user 保證已登入；每次呼叫都已向中央 Redis 確認 session
+       # 每次呼叫都已向中央 Redis 確認 session
        return {"viewer": user.email, "assets": []}
 
-3. 需要 role/權限檢查時，在 endpoint 內拿 user 繼續判斷：
-
-   @router.get("/api/reports")
-   async def reports(user: SsoUser = Depends(require_auth)):
-       if not user.email.endswith("@df-recycle.com"):
-           raise HTTPException(status_code=403, detail="forbidden")
-       return {...}
-
-4. 啟動 FastAPI 驗證端點：
+3. 啟動 FastAPI 驗證端點：
    uvicorn {APP_DIR}.main:app --reload --port {使用者填的 Port}
    curl http://localhost:{使用者填的 Port}/api/auth/me  # 應該回 401 no_token
 
-5. 在你的登入頁（React / Vue / Jinja 都可）加上按鈕：
+4. 前端 SPA（React/Vue）需實作：
+
+   (A) 登入頁（契約 #3：401 顯示按鈕，禁止自動 redirect）
 
    const SSO_URL = "{使用者填的 SSO URL}";
-   const APP_URL = "{使用者填的 App URL}";
+   const BACKEND_URL = "{使用者填的 Backend URL}";
    const APP_ID  = "{使用者填的 App ID}";
 
    const ssoUrl = `${SSO_URL}/api/auth/sso/authorize`
      + `?client_id=${encodeURIComponent(APP_ID)}`
-     + `&redirect_uri=${encodeURIComponent(APP_URL + "/api/auth/callback")}`;
+     + `&redirect_uri=${encodeURIComponent(BACKEND_URL + "/api/auth/callback")}`;
 
-   <button onClick={() => window.location.href = ssoUrl}>透過 DF-SSO 登入</button>
+   useEffect(() => {
+     fetch(`${BACKEND_URL}/api/auth/me`, { credentials: "include" })
+       .then(res => res.ok ? location.href = "/dashboard" : setShowButton(true));
+   }, []);
 
-6. 登出按鈕：
+   {showButton && <button onClick={() => location.href = ssoUrl}>透過 DF-SSO 登入</button>}
 
-   <a href="/api/auth/logout">登出</a>
+   (B) Dashboard 401 攔截器（silent re-auth；契約 #3 不適用 dashboard）
+
+   const STORAGE_PATH = "sso_reauth_path";
+   const STORAGE_ATTEMPTS = "sso_reauth_attempts";
+   let inFlight = null;
+
+   async function authedFetch(url, init) {
+     const res = await fetch(url, { credentials: "include", ...init });
+     if (res.status === 401) {
+       if (inFlight) return inFlight;
+       inFlight = new Promise(() => {
+         const n = Number(sessionStorage.getItem(STORAGE_ATTEMPTS) || "0");
+         if (n >= 2) {
+           sessionStorage.removeItem(STORAGE_PATH);
+           sessionStorage.removeItem(STORAGE_ATTEMPTS);
+           location.href = `${FRONTEND_URL}/?error=reauth_failed`;
+           return;
+         }
+         sessionStorage.setItem(STORAGE_ATTEMPTS, String(n + 1));
+         sessionStorage.setItem(STORAGE_PATH, location.pathname + location.search);
+         location.href = ssoUrl; // 整頁卸載
+       });
+       return inFlight;
+     }
+     return res;
+   }
+
+   // dashboard 入口復原
+   useEffect(() => {
+     const saved = sessionStorage.getItem(STORAGE_PATH);
+     if (saved) {
+       sessionStorage.removeItem(STORAGE_PATH);
+       sessionStorage.removeItem(STORAGE_ATTEMPTS);
+       router.replace(saved);
+     }
+   }, []);
+
+   (C) 登出按鈕：
+
+   <a href={`${BACKEND_URL}/api/auth/logout`}>登出</a>
+
+5. 前後端分離的 cookie 注意：
+   - cookie 寫在 BACKEND_URL origin
+   - 前端對 backend 的 fetch 必須帶 credentials: "include"
+   - 若 frontend 與 backend 不同 origin 且要在前端讀 cookie：
+     設 cookie domain 為共同 parent（如 .apps.zerozero.tw），或讓前端走 BFF/proxy
 ```
 
 ## 注意事項
 
-- **Async vs sync**:`httpx.AsyncClient` 對齊 FastAPI 的 async-first 設計。若你的專案是純同步(例如 Flask 或用 `def` 而不是 `async def`),把 `httpx.AsyncClient` 換成 `httpx.Client`、把 router 的 `async def` 改成 `def`,其他邏輯完全一樣
-- **Cookie secure 旗標**:`SsoSettings.is_secure` 依 `app_url` 協定自動決定;Prod `https://` 會自動打開,本機 `http://` 不會(否則瀏覽器不會送 cookie)
-- **SameSite**:固定 `Lax`,對齊 [INTEGRATION.md](../../INTEGRATION.md)。跨 domain iframe 嵌入才需 `None`+`Secure`
-- **登入頁不可自動 redirect 到 `/authorize`**:兩層 Session 模型下 AD silent SSO 永遠成功,登入頁自動 redirect 等於 logout 無效。登入頁的正確邏輯是「`/me` 200 → `/dashboard`,其餘一律顯示按鈕讓使用者親自點擊」。跨 App 第一次訪問多 1 click 是換取 logout 真有效的合理代價
-- **back-channel logout 的 TODO**:若你用 Redis / DB 存 server-side session,在 `back_channel_logout` 裡要實際去清該 `user_id` 的 session,不然只是回 200 並沒有真的登出本地
-- **HMAC constant-time compare**:`hmac.compare_digest` 是 Python 標準函式庫內建的 constant-time 比對,對齊 SSO backend 的 `crypto.timingSafeEqual`
-- **pydantic-settings 版本**:範例用 Pydantic v2 的 `pydantic-settings`。若卡在 Pydantic v1,請改成 `from pydantic import BaseSettings` 並移除 `SettingsConfigDict`
-- **HTTPX connection reuse**:為簡化,每次呼叫都新開 `AsyncClient`。若 SSO 呼叫量很大想共用連線池,可在 FastAPI `lifespan` 裡建立單一 `AsyncClient` 並注入,不影響本 skill 的其他邏輯
-- 若 `{APP_DIR}/sso/` 目錄已存在同名檔案,詢問使用者是否覆蓋
+- **Async vs sync**：`httpx.AsyncClient` 對齊 FastAPI 的 async-first 設計。若你的專案是純同步（用 `def` 而不是 `async def`），把 `httpx.AsyncClient` 換成 `httpx.Client`、把 router 的 `async def` 改成 `def`，其他邏輯完全一樣
+- **Cookie secure 旗標**：依 `backend_url` 協定自動決定；Prod `https://` 自動打開，本機 `http://` 不打（否則瀏覽器不送 cookie）
+- **SameSite**：固定 `Lax`，對齊 [INTEGRATION.md](../../INTEGRATION.md)。跨 domain iframe 嵌入才需 `None`+`Secure`
+- **登入頁 vs dashboard 401 處理不一樣**：登入頁（契約 #3）禁止自動 redirect；dashboard 工作中（silent re-auth）必須自動 redirect。前端 SPA 兩個邏輯要分清楚
+- **CORS allow_credentials**：前後端不同 origin 時是必要條件；缺一行就會「fetch 200 但前端拿不到 cookie」
+- **back-channel logout 的 TODO**：模式 A 純 SSO 通常不需動作；若你用 Redis / DB 存 server-side session，在 `back_channel_logout` 裡要實際清掉該 `user_id` 的 session。**保留無驗證的端點 比 不註冊還糟**——前者騙系統有保護
+- **HMAC constant-time compare**：`hmac.compare_digest` 是 Python 標準函式庫內建的 constant-time 比對，對齊 SSO backend 的 `crypto.timingSafeEqual`
+- **pydantic-settings 版本**：範例用 Pydantic v2 的 `pydantic-settings`。若卡在 Pydantic v1，請改成 `from pydantic import BaseSettings` 並移除 `SettingsConfigDict`
+- **HTTPX connection reuse**：為簡化，每次呼叫都新開 `AsyncClient`。若 SSO 呼叫量很大想共用連線池，可在 FastAPI `lifespan` 裡建立單一 `AsyncClient` 並注入
+- **模式 B（本地帳密 + SSO）**：JWT payload 加 `provider` claim、`require_auth` 依 `provider` 分流（SSO → 本流程；local → 查自家 session store）。本 command 不自動建立模式 B；細節見 [INTEGRATION.md](../../INTEGRATION.md)「模式 B」
+- 若 `{APP_DIR}/sso/` 目錄已存在同名檔案，詢問使用者是否覆蓋

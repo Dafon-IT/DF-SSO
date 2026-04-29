@@ -1,22 +1,33 @@
 # 初始化 SSO 登入器整合（Java Spring Boot）
 
-在當前 Spring Boot 專案中自動建立 DF-SSO 登入器所需的所有檔案（Controller、Service、HMAC 驗章、Cookie 管理）。
+在當前 Spring Boot 專案中自動建立 DF-SSO 登入器所需的所有 backend 檔案（Controller、Service、HMAC 驗章、Cookie 管理）。
 **執行前會詢問必要資訊，之後全自動完成。**
 
-> 對應 [INTEGRATION.md](../../INTEGRATION.md) 的 4 個端點設計：`/callback`、`/me`、`/logout`、`/back-channel-logout`。
+> 對應 [INTEGRATION.md](../../INTEGRATION.md) 的契約。**此 command 建立的是模式 A（純 SSO）的 backend**；登入頁與 401 攔截器在前端 SPA（React/Vue/Thymeleaf），完成訊息有對應片段。
 > 預設 **Spring Boot 3.x（Jakarta EE 9+）**。若是 Spring Boot 2.x 請把 `jakarta.servlet.*` 換成 `javax.servlet.*`。
+
+## 硬性契約（必看，漏一條就壞）
+
+1. **`/me` 即時回源中央**：`SsoAuthGuard.requireAuth` 內每次都打中央 `/api/auth/me`，**禁止本地快取 user**
+2. **登出 POST 中央 + 跟隨 redirect**：`/api/auth/logout` 必須先通知中央再清本地 cookie
+3. **登入頁 401 顯示按鈕，不自動 redirect**：前端 SPA 的登入頁在 `/me` 401 時**只**顯示按鈕；自動 redirect 會破壞「登出真有效」
+4. **Back-channel logout 必驗 HMAC + timestamp**：`MessageDigest.isEqual` + 30s drift；不註冊端點 比 註冊但不驗 還安全
+
+完整契約見 [INTEGRATION.md](../../INTEGRATION.md)「硬性契約」與「Silent Re-Auth Pattern」。
 
 ## 詢問使用者（依序）
 
 1. **SSO Backend URL** — SSO 中央伺服器的網址
-   - Prod：`https://df-sso-login.apps.zerozero.tw`
+   - Prod：`https://df-it-sso-login.it.zerozero.tw`
    - Test：`https://df-sso-login-test.apps.zerozero.tw`
    - Dev：`http://localhost:3001`
-2. **App URL** — 你的專案網址（例如 `https://warehouse.apps.zerozero.tw`，本機 `http://localhost:8080`）
-3. **App ID** — SSO Dashboard 產生的 `app_id`（UUID）
-4. **App Secret** — SSO Dashboard 產生的 `app_secret`（64 字元，保密）
-5. **Base Package** — Spring Boot 專案的基礎 package（例如 `com.example.warehouse`）
-6. **App Port** — 你的專案 Port（例如 `8080`）
+2. **Backend URL** — 你的後端對外網址（callback 落點 + cookie host，例如 `https://api.warehouse.apps.zerozero.tw`，本機 `http://localhost:8080`）
+3. **Frontend URL** — 你的前端對外網址（登入頁 / dashboard / logout fallback redirect 落點，例如 `https://warehouse.apps.zerozero.tw`，本機 `http://localhost:3000`）
+   - 若前後端**同 origin**（例如 Thymeleaf monolith），填同一個 URL 即可
+4. **App ID** — SSO Dashboard 產生的 `app_id`（UUID）
+5. **App Secret** — SSO Dashboard 產生的 `app_secret`（64 字元，保密）
+6. **Base Package** — Spring Boot 專案的基礎 package（例如 `com.example.warehouse`）
+7. **App Port** — 你的後端 Port（例如 `8080`）
 
 ## 前置檢查
 
@@ -50,6 +61,8 @@ implementation 'org.springframework.boot:spring-boot-starter-webflux'
 
 ### 1. 建立 `SsoProperties.java`
 
+`backendUrl` 是 callback 落點 + cookie host，`frontendUrl` 是登入頁 / dashboard / logout fallback。前後端同 origin 時兩者相等。
+
 路徑：`src/main/java/{PKG_PATH}/sso/SsoProperties.java`
 
 ```java
@@ -62,7 +75,8 @@ public class SsoProperties {
     private String url;
     private String appId;
     private String appSecret;
-    private String appUrl;
+    private String backendUrl;
+    private String frontendUrl;
     private int timeoutMs = 8000;
 
     public String getUrl() { return url; }
@@ -74,8 +88,11 @@ public class SsoProperties {
     public String getAppSecret() { return appSecret; }
     public void setAppSecret(String appSecret) { this.appSecret = appSecret; }
 
-    public String getAppUrl() { return appUrl; }
-    public void setAppUrl(String appUrl) { this.appUrl = appUrl; }
+    public String getBackendUrl() { return backendUrl; }
+    public void setBackendUrl(String backendUrl) { this.backendUrl = backendUrl; }
+
+    public String getFrontendUrl() { return frontendUrl; }
+    public void setFrontendUrl(String frontendUrl) { this.frontendUrl = frontendUrl; }
 
     public int getTimeoutMs() { return timeoutMs; }
     public void setTimeoutMs(int timeoutMs) { this.timeoutMs = timeoutMs; }
@@ -140,7 +157,7 @@ public class SsoClient {
                 .block();
     }
 
-    /** 以 Bearer token 呼叫 SSO `/me`，回傳 user payload。 */
+    /** 以 Bearer token 呼叫 SSO `/me`，回傳 user payload。契約 #1：每次都回源。 */
     public Map<String, Object> me(String token) {
         return webClient.get()
                 .uri("/api/auth/me")
@@ -151,9 +168,8 @@ public class SsoClient {
     }
 
     /**
-     * 通知 SSO 登出（兩層 Session 模型）：中央刪 Redis session + back-channel 通知所有 App。
-     * AD session 完全不動。SSO 回傳已驗證 origin 的 redirect URL，Controller 把瀏覽器
-     * 302 過去即可。「登出真的有效」靠 Client App 端登入頁不自動 redirect 到 /authorize 的契約。
+     * 通知 SSO 登出（兩層 Session 模型，契約 #2）：中央刪 Redis session + back-channel 通知所有 App。
+     * AD session 完全不動。SSO 回傳已驗證 origin 的 redirect URL，Controller 把瀏覽器 302 過去即可。
      *
      * @param token  Bearer token
      * @param redirectAfter  登出後最終要落地的 URL（origin 必須在 sso_allowed_list）
@@ -230,7 +246,7 @@ public class SsoCookieUtil {
 }
 ```
 
-### 4. 建立 `SsoAuthGuard.java` — Auth Middleware
+### 4. 建立 `SsoAuthGuard.java` — Auth Middleware（契約 #1）
 
 **整個整合的核心**。所有 protected endpoint（包含 `/me` 本身）都必須透過這個 Guard，才能保證「中央 session 被撤銷後下一次呼叫立即失效」。
 
@@ -262,15 +278,16 @@ public class SsoAuthGuard {
     }
 
     private boolean isSecure() {
-        return props.getAppUrl() != null && props.getAppUrl().startsWith("https://");
+        return props.getBackendUrl() != null && props.getBackendUrl().startsWith("https://");
     }
 
     /**
      * Protected endpoint 入口都呼叫這個：成功回 user map；失敗 throw SsoUnauthorizedException。
-     * <p>
-     * - no_token        → 401 + 無 token
-     * - session_expired → 401 + 自動清本地 cookie
-     * - sso_unreachable → 502（SSO 暫時不可達）
+     * <ul>
+     *   <li>no_token        → 401（前端跳登入頁顯示按鈕）</li>
+     *   <li>session_expired → 401 + 自動清本地 cookie（前端走 silent re-auth）</li>
+     *   <li>sso_unreachable → 502（不刪 cookie，避免抖動踢人）</li>
+     * </ul>
      */
     public Map<String, Object> requireAuth(HttpServletRequest req, HttpServletResponse res) {
         String token = SsoCookieUtil.readToken(req);
@@ -356,7 +373,7 @@ import javax.crypto.spec.SecretKeySpec;
 public class SsoController {
 
     private static final Logger log = LoggerFactory.getLogger(SsoController.class);
-    private static final long MAX_TIMESTAMP_DRIFT_MS = 30_000L;
+    private static final long MAX_TIMESTAMP_DRIFT_MS = 30_000L; // 雙向 abs
 
     private final SsoClient ssoClient;
     private final SsoAuthGuard ssoAuthGuard;
@@ -369,39 +386,38 @@ public class SsoController {
     }
 
     private boolean isSecure() {
-        return props.getAppUrl() != null && props.getAppUrl().startsWith("https://");
+        return props.getBackendUrl() != null && props.getBackendUrl().startsWith("https://");
     }
 
-    private void redirect(HttpServletResponse res, String path) throws IOException {
-        res.sendRedirect(URI.create(props.getAppUrl() + path).toString());
+    private void redirectFrontend(HttpServletResponse res, String path) throws IOException {
+        res.sendRedirect(URI.create(props.getFrontendUrl() + path).toString());
     }
 
-    /** 1. OAuth callback：用 code 換 token，寫進 cookie，導回首頁 */
+    /** 1. OAuth callback：用 code 換 token，寫進 cookie，導回 frontend dashboard */
     @GetMapping("/callback")
     public void callback(@RequestParam(value = "code", required = false) String code,
                          HttpServletResponse res) throws IOException {
         if (code == null || code.isBlank()) {
-            redirect(res, "/?error=no_code");
+            redirectFrontend(res, "/?error=no_code");
             return;
         }
         try {
             Map<String, Object> body = ssoClient.exchange(code);
             Object token = body == null ? null : body.get("token");
             if (!(token instanceof String t) || t.isBlank()) {
-                redirect(res, "/?error=exchange_failed");
+                redirectFrontend(res, "/?error=exchange_failed");
                 return;
             }
             SsoCookieUtil.writeToken(res, t, isSecure());
-            redirect(res, "/dashboard");
+            redirectFrontend(res, "/dashboard");
         } catch (Exception e) {
             log.warn("[SSO] exchange failed: {}", e.getMessage());
-            redirect(res, "/?error=exchange_error");
+            redirectFrontend(res, "/?error=exchange_error");
         }
     }
 
     /**
-     * 2. /me — 完全委託給 SsoAuthGuard。handler 只負責把 user 回給前端。
-     *    失敗情境由全域 {@link SsoAuthExceptionHandler} 統一轉成 401/502。
+     * 2. /me — 完全委託給 SsoAuthGuard。失敗由 {@link SsoAuthExceptionHandler} 統一轉成 401/502。
      */
     @GetMapping("/me")
     public ResponseEntity<?> me(HttpServletRequest req, HttpServletResponse res) {
@@ -410,27 +426,27 @@ public class SsoController {
     }
 
     /**
-     * 3. /logout（兩層 Session 模型）：
+     * 3. /logout（兩層 Session 模型，契約 #2）：
      *    通知 SSO 刪中央 session + back-channel 通知所有 App，清本地 cookie，導向 SSO 回傳的 redirect。
-     *    AD session 不動。「登出真的有效」靠登入頁不自動 redirect 到 /authorize 的契約。
-     *    取不到 redirect 時 fallback 回首頁帶 ?logged_out=1。
+     *    AD session 不動。取不到 redirect 時 fallback 回 frontend 首頁帶 ?logged_out=1。
      */
     @GetMapping("/logout")
     public void logout(HttpServletRequest req, HttpServletResponse res) throws IOException {
         String token = SsoCookieUtil.readToken(req);
-        String fallback = props.getAppUrl() + "/?logged_out=1";
+        String fallback = props.getFrontendUrl() + "/?logged_out=1";
         String redirectUrl = null;
         if (token != null) redirectUrl = ssoClient.logout(token, fallback);
+        // 不論成功與否：同一 response 刪 cookie
         SsoCookieUtil.clearToken(res, isSecure());
         if (redirectUrl != null) {
-            // redirectUrl 是完整 URL（已含 path/query），不可再前綴 app-url
+            // redirectUrl 是完整 URL（已含 path/query），不可再前綴 frontend-url
             res.sendRedirect(redirectUrl);
         } else {
-            redirect(res, "/?logged_out=1");
+            redirectFrontend(res, "/?logged_out=1");
         }
     }
 
-    /** 4. back-channel logout：SSO 廣播登出，驗 HMAC 後清自家 session */
+    /** 4. back-channel logout（契約 #4）：SSO 廣播登出，驗 HMAC 後清自家 session */
     @PostMapping("/back-channel-logout")
     public ResponseEntity<?> backChannelLogout(@RequestBody Map<String, Object> body) {
         Object userIdObj = body.get("user_id");
@@ -444,7 +460,7 @@ public class SsoController {
         }
         long timestamp = tsNum.longValue();
 
-        // 驗 timestamp（防 replay）
+        // 驗 timestamp（防 replay，雙向 abs）
         if (Math.abs(System.currentTimeMillis() - timestamp) > MAX_TIMESTAMP_DRIFT_MS) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "timestamp_expired"));
@@ -470,13 +486,13 @@ public class SsoController {
         }
 
         log.info("[SSO] Back-channel logout userId={}", userId);
-        // TODO: 在這裡清掉該 user 在本 App 的 server-side session（若有）
+        // TODO: 模式 A 純 SSO 通常不需動作；若有 in-process 快取 / WebSocket / Spring Session，在這裡 invalidate userId
         return ResponseEntity.ok(Map.of("success", true));
     }
 }
 ```
 
-### 6. 建立 `SsoAuthExceptionHandler.java` — 統一處理 SsoUnauthorizedException
+### 6. 建立 `SsoAuthExceptionHandler.java`
 
 路徑：`src/main/java/{PKG_PATH}/sso/SsoAuthExceptionHandler.java`
 
@@ -501,13 +517,52 @@ public class SsoAuthExceptionHandler {
 }
 ```
 
-> 這個 `@RestControllerAdvice` 會**同時接住** `/me` 以及所有其他 controller 呼叫 `ssoAuthGuard.requireAuth(...)` 時拋出的例外，統一回 `{"error": "no_token" | "session_expired" | "sso_unreachable"}`。Cookie 清除在 Guard 內已處理完畢。
+> 這個 `@RestControllerAdvice` 會**同時接住** `/me` 以及所有其他 controller 呼叫 `ssoAuthGuard.requireAuth(...)` 時拋出的例外，統一回 `{"error": "no_token" | "session_expired" | "sso_unreachable"}`。
 
-### 7. 啟用 `@ConfigurationProperties`
+### 7. 建立 `SsoCorsConfig.java` — 前後端分離必設
+
+路徑：`src/main/java/{PKG_PATH}/sso/SsoCorsConfig.java`
+
+```java
+package {PKG}.sso;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.filter.CorsFilter;
+
+import java.util.List;
+
+@Configuration
+public class SsoCorsConfig {
+
+    private final SsoProperties props;
+
+    public SsoCorsConfig(SsoProperties props) {
+        this.props = props;
+    }
+
+    @Bean
+    public CorsFilter ssoCorsFilter() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(List.of(props.getFrontendUrl()));
+        config.setAllowCredentials(true); // 允許帶 cookie
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("*"));
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return new CorsFilter(source);
+    }
+}
+```
+
+> 若 `frontendUrl == backendUrl`（同 origin），這個 bean 仍可保留，不會有副作用。
+
+### 8. 啟用 `@ConfigurationProperties`
 
 路徑：`src/main/java/{PKG_PATH}/{MainApplication}.java`
-
-在 Spring Boot 主程式加上：
 
 ```java
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -518,7 +573,7 @@ import {PKG}.sso.SsoProperties;
 public class MainApplication { ... }
 ```
 
-### 8. 更新 `application.yml`（或 `application.properties`）
+### 9. 更新 `application.yml`（或 `application.properties`）
 
 **`application.yml`**（若使用）：
 
@@ -527,7 +582,8 @@ sso:
   url: ${SSO_URL:http://localhost:3001}
   app-id: ${SSO_APP_ID:}
   app-secret: ${SSO_APP_SECRET:}
-  app-url: ${APP_URL:http://localhost:{使用者填的 Port}}
+  backend-url: ${BACKEND_URL:http://localhost:{使用者填的 Port}}
+  frontend-url: ${FRONTEND_URL:http://localhost:{使用者填的 Port}}
   timeout-ms: 8000
 ```
 
@@ -537,11 +593,12 @@ sso:
 sso.url=${SSO_URL:http://localhost:3001}
 sso.app-id=${SSO_APP_ID:}
 sso.app-secret=${SSO_APP_SECRET:}
-sso.app-url=${APP_URL:http://localhost:{使用者填的 Port}}
+sso.backend-url=${BACKEND_URL:http://localhost:{使用者填的 Port}}
+sso.frontend-url=${FRONTEND_URL:http://localhost:{使用者填的 Port}}
 sso.timeout-ms=8000
 ```
 
-### 9. 建立或更新 `.env`
+### 10. 建立或更新 `.env`
 
 在專案根目錄 `.env`（或 `env.local`、部署平台的環境變數）**追加**：
 
@@ -550,34 +607,36 @@ sso.timeout-ms=8000
 SSO_URL={使用者填的 SSO URL}
 SSO_APP_ID={使用者填的 App ID}
 SSO_APP_SECRET={使用者填的 App Secret}
-APP_URL={使用者填的 App URL}
+BACKEND_URL={使用者填的 Backend URL}
+FRONTEND_URL={使用者填的 Frontend URL}
 ```
 
 > ⚠️ `SSO_APP_SECRET` **絕不可** commit 進 git，也不可暴露給前端。
 > ⚠️ Spring Boot 預設不自動讀 `.env`，請透過 shell、Docker、Coolify 或 [`spring-dotenv`](https://github.com/paulschwarz/spring-dotenv) 之類工具載入。
+> ⚠️ SSO Dashboard 的 `redirect_uris` 註冊的是 callback 的 origin = **BACKEND_URL**，不是 frontend。
 
-### 10. 顯示完成訊息
-
-告知使用者：
+### 11. 顯示完成訊息
 
 ```
-✅ SSO 登入器整合完成（Java Spring Boot）！
+✅ SSO 登入器整合完成（Spring Boot / 模式 A 純 SSO）！
 
 已建立的檔案：
-  src/main/java/{PKG_PATH}/sso/SsoProperties.java
-  src/main/java/{PKG_PATH}/sso/SsoClient.java
+  src/main/java/{PKG_PATH}/sso/SsoProperties.java        — backendUrl + frontendUrl 兩個 origin
+  src/main/java/{PKG_PATH}/sso/SsoClient.java            — server-to-server 呼叫 SSO 中央
   src/main/java/{PKG_PATH}/sso/SsoCookieUtil.java
-  src/main/java/{PKG_PATH}/sso/SsoAuthGuard.java          — auth middleware（reusable）
+  src/main/java/{PKG_PATH}/sso/SsoAuthGuard.java         — auth middleware（契約 #1）
   src/main/java/{PKG_PATH}/sso/SsoAuthExceptionHandler.java — 統一 401/502 回應
-  src/main/java/{PKG_PATH}/sso/SsoController.java         — 4 個端點，/me 一行委託 Guard
+  src/main/java/{PKG_PATH}/sso/SsoController.java        — 4 個 backend 端點
+  src/main/java/{PKG_PATH}/sso/SsoCorsConfig.java        — allow_credentials + 白名單前端 origin
   application.yml（或 .properties）— 已追加 sso.* 設定
   .env — 已追加 SSO 環境變數
 
 📋 接下來你需要：
 
 1. 確認 SSO Dashboard 的白名單：
-   - 網域：{使用者填的 App URL}
-   - Redirect URIs 要包含：{使用者填的 App URL}
+   - 網域：{使用者填的 Backend URL}（callback 落點）
+   - Redirect URIs 要包含：{使用者填的 Backend URL}
+   - 若 BACKEND_URL ≠ FRONTEND_URL，FRONTEND_URL 也要加進 redirect_uris（logout fallback 落點驗證）
 
 2. 在 Spring Boot 主程式加上 @EnableConfigurationProperties(SsoProperties.class)
 
@@ -586,63 +645,97 @@ APP_URL={使用者填的 App URL}
    @RestController
    public class AssetsController {
        private final SsoAuthGuard ssoAuthGuard;
-
-       public AssetsController(SsoAuthGuard ssoAuthGuard) {
-           this.ssoAuthGuard = ssoAuthGuard;
-       }
+       public AssetsController(SsoAuthGuard g) { this.ssoAuthGuard = g; }
 
        @GetMapping("/api/assets")
        public ResponseEntity<?> list(HttpServletRequest req, HttpServletResponse res) {
            Map<String, Object> user = ssoAuthGuard.requireAuth(req, res);
-           // user 保證已登入；每次呼叫都已向中央 Redis 確認 session
-           return ResponseEntity.ok(Map.of(
-               "viewer", user.get("email"),
-               "assets", List.of()
-           ));
+           // 每次呼叫都已向中央 Redis 確認 session
+           return ResponseEntity.ok(Map.of("viewer", user.get("email"), "assets", List.of()));
        }
    }
 
-   失敗時會拋 SsoUnauthorizedException，由 SsoAuthExceptionHandler
-   統一轉成 {"error": "no_token"|"session_expired"|"sso_unreachable"} + 401/502。
+   失敗時拋 SsoUnauthorizedException，由 SsoAuthExceptionHandler 統一轉成
+   {"error": "no_token"|"session_expired"|"sso_unreachable"} + 401/502。
 
-4. 在你的登入頁（Thymeleaf / React / Vue 都可）加上按鈕：
+4. 前端 SPA（React/Vue/Thymeleaf 都可）需實作：
 
-   const SSO_URL  = "{使用者填的 SSO URL}";
-   const APP_URL  = "{使用者填的 App URL}";
-   const APP_ID   = "{使用者填的 App ID}";
+   (A) 登入頁（契約 #3：401 顯示按鈕，禁止自動 redirect）
+
+   const SSO_URL = "{使用者填的 SSO URL}";
+   const BACKEND_URL = "{使用者填的 Backend URL}";
+   const APP_ID  = "{使用者填的 App ID}";
 
    const ssoUrl = `${SSO_URL}/api/auth/sso/authorize`
      + `?client_id=${encodeURIComponent(APP_ID)}`
-     + `&redirect_uri=${encodeURIComponent(APP_URL + "/api/auth/callback")}`;
+     + `&redirect_uri=${encodeURIComponent(BACKEND_URL + "/api/auth/callback")}`;
 
-   <button onClick={() => window.location.href = ssoUrl}>透過 DF-SSO 登入</button>
+   useEffect(() => {
+     fetch(`${BACKEND_URL}/api/auth/me`, { credentials: "include" })
+       .then(res => res.ok ? location.href = "/dashboard" : setShowButton(true));
+   }, []);
 
-5. 在需要驗證的頁面呼叫（受保護頁面 → 失敗回登入頁；登入頁失敗 → 顯示按鈕，不可自動 redirect 到 ssoUrl）：
+   {showButton && <button onClick={() => location.href = ssoUrl}>透過 DF-SSO 登入</button>}
 
-   // 受保護頁面（dashboard 等）
-   fetch("/api/auth/me", { credentials: "include" })
-     .then(res => res.ok ? res.json() : Promise.reject())
-     .then(data => setUser(data.user))
-     .catch(() => window.location.href = "/");  // 回首頁讓使用者看到登入按鈕
+   (B) Dashboard 401 攔截器（silent re-auth；契約 #3 不適用 dashboard）
 
-   // 登入頁（首頁）：已登入直接進 dashboard，否則一律顯示按鈕（不可自動 redirect 到 ssoUrl，否則登出無效）
-   fetch("/api/auth/me", { credentials: "include" })
-     .then(res => { if (res.ok) location.href = "/dashboard"; })
-     .catch(() => {});
+   const STORAGE_PATH = "sso_reauth_path";
+   const STORAGE_ATTEMPTS = "sso_reauth_attempts";
+   let inFlight = null;
 
-6. 登出按鈕：
+   async function authedFetch(url, init) {
+     const res = await fetch(url, { credentials: "include", ...init });
+     if (res.status === 401) {
+       if (inFlight) return inFlight;
+       inFlight = new Promise(() => {
+         const n = Number(sessionStorage.getItem(STORAGE_ATTEMPTS) || "0");
+         if (n >= 2) {
+           sessionStorage.removeItem(STORAGE_PATH);
+           sessionStorage.removeItem(STORAGE_ATTEMPTS);
+           location.href = `${FRONTEND_URL}/?error=reauth_failed`;
+           return;
+         }
+         sessionStorage.setItem(STORAGE_ATTEMPTS, String(n + 1));
+         sessionStorage.setItem(STORAGE_PATH, location.pathname + location.search);
+         location.href = ssoUrl; // 整頁卸載
+       });
+       return inFlight;
+     }
+     return res;
+   }
 
-   <a href="/api/auth/logout">登出</a>
+   // dashboard 入口復原
+   useEffect(() => {
+     const saved = sessionStorage.getItem(STORAGE_PATH);
+     if (saved) {
+       sessionStorage.removeItem(STORAGE_PATH);
+       sessionStorage.removeItem(STORAGE_ATTEMPTS);
+       router.replace(saved);
+     }
+   }, []);
+
+   (C) 登出按鈕：
+
+   <a href={`${BACKEND_URL}/api/auth/logout`}>登出</a>
+
+5. 前後端分離的 cookie 注意：
+   - cookie 寫在 BACKEND_URL origin
+   - 前端對 backend 的 fetch 必須帶 credentials: "include"
+   - 若 frontend 與 backend 不同 origin 且要在前端讀 cookie：
+     設 cookie domain 為共同 parent（如 .apps.zerozero.tw），或讓前端走 BFF/proxy
 ```
 
 ## 注意事項
 
 - **Spring Boot 版本**：Boot 3.x = `jakarta.servlet.*`；Boot 2.x 請全部換成 `javax.servlet.*`
 - **同步 vs 反應式**：`SsoClient` 使用 `WebClient` 但以 `.block()` 收斂成同步呼叫，因為 4 個端點都是一次性的短交互，不需要非同步
-  - 若專案排斥 `webflux`，可改用 `RestTemplate`，`exchange`/`me`/`logout` 全部改成 `restTemplate.postForEntity(...)` / `getForEntity(...)` 即可，HMAC 驗章部分完全一樣
-- **Secure cookie**：`isSecure()` 根據 `APP_URL` 協定自動決定；若 Prod 走 `https://` 一定要保留
-- **SameSite**：固定 `Lax`（對齊 [INTEGRATION.md](../../INTEGRATION.md) 範例）；若要跨 domain iframe 嵌入才需 `None`+`Secure`
-- **back-channel logout 的 TODO**：若你的 Spring Boot 本地保存了 server-side session（例如 Spring Session / Redis），在 `backChannelLogout` 裡要主動 invalidate 該 `userId` 的 session，不然單純回 200 不會真的清掉
-- **HMAC constant-time compare**：`MessageDigest.isEqual(byte[], byte[])` 是 Java 內建的 constant-time 比對（對齊 SSO backend 的 `crypto.timingSafeEqual`）
+  - 若專案排斥 `webflux`，可改用 `RestTemplate`，HMAC 驗章部分完全一樣
+- **Secure cookie**：依 `backendUrl` 協定自動決定；Prod `https://` 一定要保留
+- **SameSite**：固定 `Lax`，對齊 [INTEGRATION.md](../../INTEGRATION.md)；跨 domain iframe 嵌入才需 `None`+`Secure`
+- **登入頁 vs dashboard 401 處理不一樣**：登入頁（契約 #3）禁止自動 redirect；dashboard 工作中（silent re-auth）必須自動 redirect。前端 SPA 兩個邏輯要分清楚
+- **CORS allow_credentials**：前後端不同 origin 時是必要條件；缺一行就會「fetch 200 但前端拿不到 cookie」。`allowedOrigins` 不可用 `"*"`，必須白名單列出實際前端 origin
+- **back-channel logout 的 TODO**：模式 A 純 SSO 通常不需動作；若你用 Spring Session / Redis 存 server-side session，要主動 invalidate 該 `userId`。**保留無驗證的端點 比 不註冊還糟**——前者騙系統有保護
+- **HMAC constant-time compare**：`MessageDigest.isEqual(byte[], byte[])` 是 Java 內建的 constant-time 比對，對齊 SSO backend 的 `crypto.timingSafeEqual`
 - **Package 樣板替換**：`{PKG}` 請替換成使用者填的 base package（`com.example.warehouse`），`{PKG_PATH}` 是同一字串但 `.` → `/`
+- **模式 B（本地帳密 + SSO）**：JWT payload 加 `provider` claim、`SsoAuthGuard` 依 `provider` 分流（SSO → 本流程；local → 查自家 session store）。本 command 不自動建立模式 B；細節見 [INTEGRATION.md](../../INTEGRATION.md)「模式 B」
 - 若 `src/main/java/{PKG_PATH}/sso/` 目錄已存在同名檔案，詢問使用者是否覆蓋

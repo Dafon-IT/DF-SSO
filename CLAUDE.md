@@ -6,7 +6,7 @@
 >
 > | 環境 | Frontend | Backend | Compose | Migrations |
 > |------|----------|---------|---------|------------|
-> | **Prod** | `https://df-sso-management.apps.zerozero.tw` | `https://df-sso-login.apps.zerozero.tw` | `docker-compose-prod.yml` | `backend/migrations/prod/` |
+> | **Prod** | `https://df-it-sso-management.it.zerozero.tw` | `https://df-it-sso-login.it.zerozero.tw` | `docker-compose-prod.yml` | `backend/migrations/prod/` |
 > | **Test** | `https://df-sso-management-test.apps.zerozero.tw` | `https://df-sso-login-test.apps.zerozero.tw` | `docker-compose-test.yml` | `backend/migrations/dev/` |
 > | **Dev**  | `http://localhost:3000` | `http://localhost:3001` | `docker-compose-dev.yml` | `backend/migrations/dev/` |
 >

@@ -11,7 +11,7 @@
 /** @type {import('node-pg-migrate').ColumnDefinitions | undefined} */
 export const shorthands = undefined;
 
-const PROD_MANAGEMENT_ORIGIN = 'https://df-sso-management.apps.zerozero.tw';
+const PROD_MANAGEMENT_ORIGIN = 'https://df-it-sso-management.it.zerozero.tw';
 
 /** @param pgm {import('node-pg-migrate').MigrationBuilder} */
 export const up = (pgm) => {
