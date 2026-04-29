@@ -106,8 +106,27 @@ Portal 模式的副作用：使用者在別 App 主動登出後，打開本 App 
 
 | 端 | 職責 |
 |---|---|
-| **Server-side**（Client App 後端）| 1. Back-channel logout 驗 HMAC + timestamp 通過後，把 `user_id` 寫進 short-TTL cache（建議 5 分鐘）<br>2. 受保護路由守衛在「中央回 401」時，從失效 token 解 payload 取出 `user_id`（**不驗簽，純讀 claims**），查 cache<br>3. 命中 → 在 401 response 加 header `X-Recently-Logged-Out: 1`<br>4. 跨 origin 部署時，CORS `expose_headers` 必須包含 `X-Recently-Logged-Out`（否則前端讀不到） |
+| **Server-side**（Client App 後端）| 1. Back-channel logout 驗 HMAC + timestamp 通過後，把 `user_id` 寫進 short-TTL cache（建議 5 分鐘）<br>2. 受保護路由守衛在「中央回 401」時，從失效 token 解 payload 取出 `user_id`（**不驗簽，純讀 claims**），查 cache<br>3. 命中 → 在 401 response 同時做兩件事：<br>　a. 加 header `X-Recently-Logged-Out: 1`<br>　b. **種一顆 `sso_recent_logout=1` httpOnly cookie（5 分鐘 TTL）**<br>4. **後續沒有 token 的 401（使用者刪 url 重輸首頁、開新 tab、用 page router 跑任意 route 等情境）** → 改檢查這顆 hint cookie，命中一樣回 `X-Recently-Logged-Out: 1` header<br>5. 主動登出 endpoint 也應該種這顆 cookie（讓自家登出有同樣的視覺持續性）<br>6. 成功重新登入（callback 寫 `token`）時應清掉這顆 cookie<br>7. 跨 origin 部署時，CORS `expose_headers` 必須包含 `X-Recently-Logged-Out`（否則前端讀不到） |
 | **Client-side**（Client App 前端）| 1. 任何 401 response 讀 `X-Recently-Logged-Out` header<br>2. header = `1` → silent re-auth 攔截器跳到 `/?logged_out=1`，不走 SSO authorize<br>3. header 不存在 → 走原本 silent re-auth 路徑（自然過期復原）|
+
+#### 為什麼需要 hint cookie 而不是只有 cache
+
+只有 server-side cache 會漏掉這個情境：
+
+```
+[App A 登出 → back-channel 推到 App B → cache 標記 user_id]
+[使用者在 App B 觸發第一次 401（含 stale token）]
+   → require_user 解 token user_id → 命中 cache → 回 header + 刪 sso_token cookie
+[silent-reauth.ts 看到 header → 跳 /?logged_out=1]
+[使用者按住 backspace 把 url 變成 / 重輸 → 重新打 /me]
+   → require_user：sso_token 已被刪、no_token 分支
+   → ★ 解不出 user_id 來查 cache ★
+   → 退化成一般 401 → silent re-auth → AD silent SSO 把人拉回 dashboard
+```
+
+漏洞核心：**JWT 一被刪，server 沒辦法從後續 request 認出「這是同一個使用者」**。
+
+種 hint cookie 解掉這個漏洞：cookie 跟 sso_token 是兩顆獨立 cookie，刪掉 sso_token 不會動到 hint cookie。後續任何 no_token 401 仍能透過 hint cookie 知道「使用者剛被踢」並回 header。Cookie 是 httpOnly + 5 分鐘 TTL：前端讀不到（不能被 JS 偽造），瀏覽器自動過期不需手動清。
 
 #### 為什麼能用「不驗簽」解 token
 

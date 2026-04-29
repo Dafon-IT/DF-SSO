@@ -264,24 +264,38 @@ backend 行為兩個情境完全一致（都是「沒中央 session → 走 OAut
 
 Portal 模式有個副作用：使用者主動登出 App A 後，打開 App B 會被 silent re-auth 拉回 dashboard，「登出」視覺上像沒發生。雖然中央 session 真的死了（舊 token 全失效），但**視覺上抵消了使用者主動登出的意圖**。
 
-解這個 UX 問題的可選機制——「Single Logout 加強模式」靠 **server-side 短期黑名單 + 401 response header** 把「剛被踢」與「自然過期」這兩種 401 區分開來：
+解這個 UX 問題的可選機制——「Single Logout 加強模式」靠 **server-side 短期黑名單 + 401 response header + httpOnly hint cookie** 把「剛被踢」與「自然過期」這兩種 401 區分開來：
 
 ```
 [App A 登出]
    ↓ 中央 push back-channel 給所有 App
 [App B 後端] HMAC 驗過 → mark recently_logged_out[user_id] = now (TTL 5 min)
 
-[使用者打開 App B → /me 401]
+[使用者觸發 App B 任何 fetch → /me 401（still has stale sso_token）]
 [App B 後端] 解 token payload 取 user_id（不驗簽，純讀 claims）
-             → 查 recently_logged_out cache
-             → 命中 → 401 response header 加 `X-Recently-Logged-Out: 1`
+             → 查 recently_logged_out cache → 命中
+             → 401 response 同時做：
+               a. 加 header `X-Recently-Logged-Out: 1`
+               b. 種 hint cookie `sso_recent_logout=1`（httpOnly, 5min TTL）
+               c. 刪 sso_token cookie（已是失效 token）
    ↓
-[App B 前端] silent re-auth 看到此 header → 跳 `/?logged_out=1`，不走 SSO authorize
+[App B 前端] silent re-auth 看到 header → 跳 `/?logged_out=1`，不走 SSO authorize
    ↓
-使用者看到「已成功登出」綠色橫條 + 登入按鈕（5 分鐘內冷卻期）
+使用者看到「已成功登出」綠色橫條 + 登入按鈕
+
+★ 漏洞補強：使用者刪 url、開新 tab、跑任意 page route ★
    ↓
-5 分鐘後 cache 過期 → silent re-auth 又恢復作用（避免無限封鎖）
+[使用者刪 ?logged_out=1 重輸 / → /me no_token]
+[App B 後端] sso_token 沒了，**改查 sso_recent_logout cookie**
+             → 命中 → 仍然回 header `X-Recently-Logged-Out: 1`
+   ↓
+[App B 前端] silent re-auth 又跳 /?logged_out=1
+   ↓
+[使用者跑任何 route /servers/abc 也一樣]
+   → 同樣被 hint cookie 攔下顯示登出視覺
 ```
+
+**為什麼要種 cookie 不是只有 cache：** JWT 一被刪後，server 從「沒帶 token 的 request」認不出是同一個使用者，cache 查無此人 → silent re-auth 又把人拉回。Hint cookie 是獨立的一顆 cookie，刪 sso_token 不會動到它，5 分鐘自然過期。Cookie httpOnly 防 JS 偽造。
 
 完整契約（雙向、跨語言、TTL 取值理由、多 instance 注意事項）見 [INTEGRATION.md「Single Logout 加強模式」](../INTEGRATION.md)。**Coolify-API-Integration 是參考實作**：`backend/app/services/logout_cache.py` + `backend/app/utils/jwt_decode.py` + `frontend/src/lib/silent-reauth.ts` 的 `recentlyLoggedOut` 分支。
 
