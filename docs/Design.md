@@ -260,6 +260,33 @@ backend 行為兩個情境完全一致（都是「沒中央 session → 走 OAut
 > - **嚴格模式**：靠 Client App 顯示登入頁（contract #3 嚴格模式）保證使用者看到未登入狀態
 > - **Portal 模式**：放棄跨 App 視覺傳遞，僅靠 `?logged_out=1` 例外保留「當下 App 看到登出訊息」這一條最低限度視覺
 
+### Single Logout 加強模式（可選）
+
+Portal 模式有個副作用：使用者主動登出 App A 後，打開 App B 會被 silent re-auth 拉回 dashboard，「登出」視覺上像沒發生。雖然中央 session 真的死了（舊 token 全失效），但**視覺上抵消了使用者主動登出的意圖**。
+
+解這個 UX 問題的可選機制——「Single Logout 加強模式」靠 **server-side 短期黑名單 + 401 response header** 把「剛被踢」與「自然過期」這兩種 401 區分開來：
+
+```
+[App A 登出]
+   ↓ 中央 push back-channel 給所有 App
+[App B 後端] HMAC 驗過 → mark recently_logged_out[user_id] = now (TTL 5 min)
+
+[使用者打開 App B → /me 401]
+[App B 後端] 解 token payload 取 user_id（不驗簽，純讀 claims）
+             → 查 recently_logged_out cache
+             → 命中 → 401 response header 加 `X-Recently-Logged-Out: 1`
+   ↓
+[App B 前端] silent re-auth 看到此 header → 跳 `/?logged_out=1`，不走 SSO authorize
+   ↓
+使用者看到「已成功登出」綠色橫條 + 登入按鈕（5 分鐘內冷卻期）
+   ↓
+5 分鐘後 cache 過期 → silent re-auth 又恢復作用（避免無限封鎖）
+```
+
+完整契約（雙向、跨語言、TTL 取值理由、多 instance 注意事項）見 [INTEGRATION.md「Single Logout 加強模式」](../INTEGRATION.md)。**Coolify-API-Integration 是參考實作**：`backend/app/services/logout_cache.py` + `backend/app/utils/jwt_decode.py` + `frontend/src/lib/silent-reauth.ts` 的 `recentlyLoggedOut` 分支。
+
+不實作不違反任何硬性契約——只是 Portal 模式的 UX 加強。嚴格模式天生不需要（登入頁顯示按鈕、silent re-auth 不自動觸發）。
+
 ### 設計取捨：DF-SSO vs Microsoft 365
 
 「為什麼 Microsoft 365 可以打開 outlook 即進、DF-SSO 不可以（嚴格模式）」這個問題的答案在 **登出時殺 AD 那層的權力**：

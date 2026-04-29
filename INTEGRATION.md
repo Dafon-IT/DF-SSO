@@ -96,6 +96,43 @@ Mode B 的 Portal 模式必須**provider-aware**：
 
 **純 Mode A 的 App** 不需要這層分流，登入頁可以直接 auto-redirect，無需 hint。
 
+### Single Logout 加強模式（可選，給 Portal 模式用）
+
+Portal 模式的副作用：使用者在別 App 主動登出後，打開本 App 會被 silent re-auth + AD silent SSO 拉回 dashboard，「登出」變成「登出 → 立刻自動登入新 session」一個無感連續動作。中央 session 真實狀態正確（舊 session 真的死了、舊 token 真的失效）但**視覺上抵消了使用者主動登出的意圖**。
+
+要解這個視覺問題，可選擇實作 **Single Logout 加強模式**——讓 client app 短時間內記住「這個 user 剛被踢」，在 silent re-auth 之前加一道煞車。
+
+#### 契約（雙向）
+
+| 端 | 職責 |
+|---|---|
+| **Server-side**（Client App 後端）| 1. Back-channel logout 驗 HMAC + timestamp 通過後，把 `user_id` 寫進 short-TTL cache（建議 5 分鐘）<br>2. 受保護路由守衛在「中央回 401」時，從失效 token 解 payload 取出 `user_id`（**不驗簽，純讀 claims**），查 cache<br>3. 命中 → 在 401 response 加 header `X-Recently-Logged-Out: 1`<br>4. 跨 origin 部署時，CORS `expose_headers` 必須包含 `X-Recently-Logged-Out`（否則前端讀不到） |
+| **Client-side**（Client App 前端）| 1. 任何 401 response 讀 `X-Recently-Logged-Out` header<br>2. header = `1` → silent re-auth 攔截器跳到 `/?logged_out=1`，不走 SSO authorize<br>3. header 不存在 → 走原本 silent re-auth 路徑（自然過期復原）|
+
+#### 為什麼能用「不驗簽」解 token
+
+中央已經拒絕此 token、token 已被當作失效。我們**不信任**這個 token 的 claims 做授權決定，**只用 `user_id` 當 cache key**——就算攻擊者偽造一個假 token、`user_id` 是隨便填的，最壞情況也只是查到 cache 命中的別人 user_id（如果剛好猜對）→ 給他自己看登出視覺。對攻擊者沒任何利得（cache 本來就會在他身上自然過期）。
+
+#### TTL 取值理由
+
+| TTL | 後果 |
+|---|---|
+| 太短（例：30 秒）| 使用者切到別 App 之前 cache 就過期，silent re-auth 又恢復作用 |
+| 5 分鐘（建議）| 使用者主動登出後**5 分鐘內**打開任何 App 都會看到登出視覺；之後想回來只能主動點按鈕 |
+| 太長（例：30 分鐘）| 阻礙使用者重新登入，必須等過久或手動清 storage |
+
+#### 多 instance 部署注意
+
+In-memory cache 只在單一 backend instance 內生效。如果 App 後端水平擴展，需要把 cache 換成 Redis 或類似共享 store——否則 back-channel 推到 instance A、使用者下次 request 落在 instance B、查不到 cache、加不到 header。
+
+#### 不實作的後果
+
+不做也不違反任何硬性契約——這只是 Portal 模式的 UX 加強。不做的話使用者會看到「登出 → 1-2 秒 silent → 又回 dashboard」的怪異 UX，但中央 session、AD session、token 失效這些**安全層面都正確**。
+
+#### 嚴格模式不需要這個
+
+嚴格模式登入頁本來就顯示按鈕，silent re-auth 不會自動觸發，沒有「被 silent 拉回」的問題，自然不需要這個加強模式。
+
 ---
 
 ## 必要組件清單
